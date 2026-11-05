@@ -33,12 +33,13 @@
   };
 
   const PRIORITY = {
-    high: { label: "高", cls: "high", rank: 0 },
-    normal: { label: "中", cls: "", rank: 1 },
-    low: { label: "低", cls: "low", rank: 2 },
+    pinned: { label: "长期", cls: "pinned", rank: 0 },
+    high: { label: "高", cls: "high", rank: 1 },
+    normal: { label: "中", cls: "", rank: 2 },
+    low: { label: "低", cls: "low", rank: 3 },
   };
-  const PRIORITY_ORDER = ["high", "normal", "low"];
-  const PRIORITY_BAND_LABEL = { high: "高优先级", normal: "中优先级", low: "低优先级" };
+  const PRIORITY_ORDER = ["pinned", "high", "normal", "low"];
+  const PRIORITY_BAND_LABEL = { pinned: "置顶 · 长期", high: "高优先级", normal: "中优先级", low: "低优先级" };
   const STATUS = {
     todo: { label: "待办", rank: 1 },
     doing: { label: "进行中", rank: 0 },

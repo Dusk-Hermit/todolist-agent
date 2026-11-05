@@ -342,7 +342,7 @@ func (a *App) setPrefs(p Prefs) {
 
 func normalizePriority(p string) string {
 	switch p {
-	case priorityLow, priorityNormal, priorityHigh:
+	case priorityPinned, priorityHigh, priorityNormal, priorityLow:
 		return p
 	default:
 		return priorityNormal
@@ -504,12 +504,14 @@ func statusRank(status string) int {
 
 func priorityRank(priority string) int {
 	switch normalizePriority(priority) {
-	case priorityHigh:
+	case priorityPinned:
 		return 0
+	case priorityHigh:
+		return 1
 	case priorityLow:
-		return 2
+		return 3
 	}
-	return 1
+	return 2
 }
 
 func todoOrderLess(a, b Todo) bool {
@@ -620,6 +622,8 @@ func (a *App) moveTodo(id, priority, beforeID string, after bool, actor string) 
 
 func priorityLabel(priority string) string {
 	switch normalizePriority(priority) {
+	case priorityPinned:
+		return "置顶 · 长期"
 	case priorityHigh:
 		return "高优先级"
 	case priorityLow:
@@ -944,7 +948,7 @@ func (a *App) agentsBlock() string {
 		"2. `GET <url>/api/todos` 查看全部任务（含 `dropped`），用于查重和定位。",
 		"3. `GET <url>/api/journal?limit=20&q=关键词` 回看旧想法原文及其关联任务。",
 		"4. `POST <url>/api/todos` 执行动作：",
-		"   - `{\"action\":\"add\",\"title\":\"...\",\"notes\":\"...\",\"priority\":\"high|normal|low\",\"parentId\":\"...\",\"sourceMessageId\":\"...\"}`",
+		"   - `{\"action\":\"add\",\"title\":\"...\",\"notes\":\"...\",\"priority\":\"pinned|high|normal|low\",\"parentId\":\"...\",\"sourceMessageId\":\"...\"}`",
 		"   - `{\"action\":\"update\",\"id\":\"...\",\"title\":\"...\",\"status\":\"todo|doing|done|dropped\",\"dropReason\":\"...\"}`",
 		"   - `{\"action\":\"complete\",\"id\":\"...\"}` / `reopen` / `drop`（带 reason） / `delete`",
 		"",
@@ -952,6 +956,7 @@ func (a *App) agentsBlock() string {
 		"- 只把**明确的行动意图**（想做、要做、记一下、提醒我、推进某事）提炼成任务；纯情绪/感慨/分享不要自动建任务，可以简短回应或问一句是否需要记下。",
 		"- 一条消息有多个行动点就拆成多个任务；一个行动点不要拆碎。",
 		"- 任务支持一层子任务：`add` 时传 `parentId` 即可；子任务不能再有子任务。只有当一个任务确实有 2-5 个明确步骤时才拆子任务，不要为了层级而层级。",
+		"- 长期跟踪、需要一直排在最前面但不紧急的任务用 `priority:\"pinned\"`（置顶 · 长期）；它排在 high 之前，但视觉上不抢高优先级。",
 		"- 先查列表再新增，避免重复；相似任务优先 update 而不是 add。",
 		"- 用户说“关掉/做完了/搞定” → `complete`；说“不做了/算了/放弃/搁置/丢弃” → `drop` 并写 `reason`；只有明确说“删除/删掉”才 `delete`。",
 		"- 开始处理某任务 → `doing`；完成后 → `done`。",

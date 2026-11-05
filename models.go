@@ -2,7 +2,7 @@ package main
 
 const (
 	appName    = "TodoList Agent"
-	appVersion = "0.2.2"
+	appVersion = "0.2.3"
 	appID      = "Dusk.TodoListAgent"
 
 	statusTodo    = "todo"
@@ -13,6 +13,7 @@ const (
 	priorityLow    = "low"
 	priorityNormal = "normal"
 	priorityHigh   = "high"
+	priorityPinned = "pinned" // 置顶 · 长期
 )
 
 // Todo is one user-visible task. JSON keys are consumed directly by the web UI.
