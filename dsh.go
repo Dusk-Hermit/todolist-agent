@@ -526,6 +526,7 @@ func (c *DSHClient) activate(ctx context.Context, base string, secret []byte, it
 	}
 	st.CheckedAt = time.Now().UnixMilli()
 	a.setStatus(st)
+	a.syncAgentsBlock()
 	a.emit("sessions", opts)
 	a.emitStatus()
 	a.emitState()

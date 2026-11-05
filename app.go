@@ -84,8 +84,10 @@ func (a *App) Start() error {
 		log.Printf("state load failed, starting fresh: %v", err)
 	}
 	a.iconPath = filepath.Join(dir, "icon.ico")
-	if err := os.WriteFile(a.iconPath, iconICO, 0o644); err != nil {
-		log.Printf("write icon: %v", err)
+	if old, err := os.ReadFile(a.iconPath); err != nil || !bytes.Equal(old, iconICO) {
+		if err := os.WriteFile(a.iconPath, iconICO, 0o644); err != nil {
+			log.Printf("write icon: %v", err)
+		}
 	}
 
 	a.bridge = newBridge(a)
@@ -1006,6 +1008,48 @@ func (a *App) agentsBlock() string {
 		"当前接口地址（可能随应用重启变化，以 bridge.json 为准）：" + url,
 		agentsEnd,
 	}, "\n")
+}
+
+// syncAgentsBlock refreshes an existing, user-approved AGENTS.local.md after
+// an app update. It never creates the file on its own: onboarding remains the
+// explicit opt-in, but once the marker block exists it should not go stale.
+func (a *App) syncAgentsBlock() {
+	if !a.shouldWriteAgents() {
+		return
+	}
+	status := a.getStatus()
+	cwd := strings.TrimSpace(status.CWD)
+	if cwd == "" {
+		a.mu.Lock()
+		cwd = strings.TrimSpace(a.state.DSH.Workspace)
+		a.mu.Unlock()
+	}
+	if cwd == "" {
+		return
+	}
+	path := filepath.Join(cwd, "AGENTS.local.md")
+	old, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	content := string(old)
+	i := strings.Index(content, agentsBegin)
+	if i < 0 {
+		return
+	}
+	j := strings.Index(content[i:], agentsEnd)
+	if j < 0 {
+		return
+	}
+	current := content[i : i+j+len(agentsEnd)]
+	if current == a.agentsBlock() {
+		return
+	}
+	if _, err := a.writeAgentsBlock(); err != nil {
+		log.Printf("refresh AGENTS.local.md: %v", err)
+	} else {
+		log.Printf("refreshed AGENTS.local.md for %s", appVersion)
+	}
 }
 
 func (a *App) writeAgentsBlock() (string, error) {

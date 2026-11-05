@@ -20,8 +20,13 @@ $dest = Join-Path $env:LOCALAPPDATA "Programs\TodoList Agent"
 $exe = Join-Path $dest "TodoListAgent.exe"
 
 Write-Host "==> 关闭 TodoList Agent ..."
+$running = @(Get-Process TodoListAgent -ErrorAction SilentlyContinue)
+foreach ($p in $running) {
+  try { $null = $p.CloseMainWindow() } catch {}
+}
+if ($running.Count -gt 0) { Start-Sleep -Milliseconds 700 }
 Get-Process TodoListAgent -ErrorAction SilentlyContinue | Stop-Process -Force
-Start-Sleep -Milliseconds 600
+Start-Sleep -Milliseconds 900
 
 # --- 快捷方式 ---------------------------------------------------------------
 $startMenu = [Environment]::GetFolderPath("Programs")
@@ -33,6 +38,17 @@ if (Test-Path $desktopShortcut) { Remove-Item $desktopShortcut -Force }
 # --- 注册表 -----------------------------------------------------------------
 $uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\TodoListAgent"
 if (Test-Path $uninstallKey) { Remove-Item $uninstallKey -Recurse -Force }
+try {
+  Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class TodoListShellRefresh {
+  [DllImport("shell32.dll")]
+  public static extern void SHChangeNotify(int eventId, uint flags, IntPtr item1, IntPtr item2);
+}
+'@ -ErrorAction SilentlyContinue
+  [TodoListShellRefresh]::SHChangeNotify(0x08000000, 0x0000, [IntPtr]::Zero, [IntPtr]::Zero)
+} catch {}
 
 if ($PurgeData) {
   $data = Join-Path $env:APPDATA "TodoListAgent"

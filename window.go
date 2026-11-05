@@ -124,7 +124,6 @@ func (a *App) installWindowChrome() {
 	if a.hwnd == 0 {
 		return
 	}
-	setAppUserModelID(appID)
 	setWindowTitle(a.hwnd, appName)
 	setWindowIcon(a.hwnd, a.iconPath)
 	setLightTitleBar(a.hwnd)

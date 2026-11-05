@@ -7,7 +7,7 @@
 #>
 [CmdletBinding()]
 param(
-  [string]$Version = "0.2.5"
+  [string]$Version = "0.2.6"
 )
 
 $ErrorActionPreference = "Stop"
@@ -31,6 +31,17 @@ $env:CGO_ENABLED = "0"
 $env:GOTOOLCHAIN = "auto"
 
 Write-Host "==> Go: $(& $go version)"
+
+# --- 版本一致性检查 ---------------------------------------------------------
+# appVersion / installer / about 页面各自带着版本号；构建时先校验，避免发布
+# 一个 exe 是 0.2.6、卸载信息却还是 0.2.5 的版本。
+$modelVersion = (Select-String -Path "models.go" -Pattern 'appVersion\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+$installVersion = (Select-String -Path "install.ps1" -Pattern 'DisplayVersion" -Value "([^"]+)"').Matches[0].Groups[1].Value
+$webVersion = (Select-String -Path "web\index.html" -Pattern 'aboutVersion">([^<]+)<').Matches[0].Groups[1].Value
+if ($Version -ne $modelVersion -or $Version -ne $installVersion -or $Version -ne $webVersion) {
+  throw "版本不一致: build=$Version models=$modelVersion install=$installVersion web=$webVersion"
+}
+Write-Host "==> 版本: $Version"
 
 # --- 图标工具 --------------------------------------------------------------
 $rsrc = Join-Path $env:USERPROFILE "go\bin\rsrc.exe"
@@ -58,6 +69,7 @@ if ($LASTEXITCODE -ne 0) { throw "go build 失败" }
 
 # --- 组装发布目录 -----------------------------------------------------------
 Copy-Item "install.ps1", "install.cmd", "uninstall.ps1", "uninstall.cmd", "README.md" "dist\" -Force
+Copy-Item "assets\icon.ico" "dist\icon.ico" -Force
 if (Test-Path "docs") {
   if (Test-Path "dist\docs") { Remove-Item "dist\docs" -Recurse -Force }
   Copy-Item "docs" "dist\docs" -Recurse -Force
@@ -68,6 +80,7 @@ $zip = "dist\TodoListAgent-win64.zip"
 Remove-Item $zip -Force -ErrorAction SilentlyContinue
 $zipItems = @(
   "dist\TodoListAgent.exe",
+  "dist\icon.ico",
   "dist\install.ps1",
   "dist\install.cmd",
   "dist\uninstall.ps1",
