@@ -203,6 +203,13 @@ func (r replica) delta(known replicaManifest) replicaDelta {
 }
 
 func (d replicaDelta) expand(base replica) (replica, error) {
+	// Leave room for local increments and keep counters exact in JSON clients.
+	const maxClockCounter = 1<<53 - 1
+	for _, counter := range d.Manifest.Clock {
+		if counter > maxClockCounter {
+			return replica{}, fmt.Errorf("同步版本计数超出范围")
+		}
+	}
 	out := replica{Device: d.Manifest.Device, Clock: d.Manifest.Clock, List: d.Manifest.List,
 		Tasks: make(map[string]replicaRecord, len(d.Manifest.Versions))}
 	for key, version := range d.Manifest.Versions {
@@ -212,6 +219,11 @@ func (d replicaDelta) expand(base replica) (replica, error) {
 		}
 		if !ok || record.version() != version {
 			return replica{}, fmt.Errorf("同步增量不完整")
+		}
+		for device, counter := range record.Clock {
+			if counter > out.Clock[device] {
+				return replica{}, fmt.Errorf("同步条目版本超出清单范围")
+			}
 		}
 		out.Tasks[key] = record
 	}

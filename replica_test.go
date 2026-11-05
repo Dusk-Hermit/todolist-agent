@@ -52,3 +52,21 @@ func TestReplicaSequentialEditWithOlderWallClock(t *testing.T) {
 		t.Fatalf("causal edit lost to clock skew: %s", got)
 	}
 }
+
+func TestReplicaDeltaRejectsOverflowedClock(t *testing.T) {
+	delta := replicaDelta{Manifest: replicaManifest{Clock: vector{"device": ^uint64(0)}}}
+	if _, err := delta.expand(replica{}); err == nil {
+		t.Fatal("replica accepted a clock that would wrap on the next edit")
+	}
+}
+
+func TestReplicaDeltaRejectsRecordClockAheadOfManifest(t *testing.T) {
+	record := replicaRecord{Clock: vector{"device": 2}}
+	delta := replicaDelta{
+		Manifest: replicaManifest{Clock: vector{"device": 1}, Versions: map[string]string{"todo:x": record.version()}},
+		Records:  map[string]replicaRecord{"todo:x": record},
+	}
+	if _, err := delta.expand(replica{}); err == nil {
+		t.Fatal("replica accepted a record clock ahead of its manifest")
+	}
+}
