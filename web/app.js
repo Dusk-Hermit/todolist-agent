@@ -410,7 +410,7 @@
       const oa = typeof a.position === "number" ? a.position : 0;
       const ob = typeof b.position === "number" ? b.position : 0;
       if (oa !== ob) return oa - ob;
-      return (b.createdAt || 0) - (a.createdAt || 0);
+      return (a.createdAt || 0) - (b.createdAt || 0);
     });
   }
 

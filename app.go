@@ -371,6 +371,12 @@ func (a *App) addTodo(in TodoInput, source, actor string) (Todo, error) {
 	if len([]rune(notes)) > 2000 {
 		notes = string([]rune(notes)[:2000])
 	}
+	placement := strings.ToLower(strings.TrimSpace(in.Placement))
+	if placement != "" && placement != "first" && placement != "last" {
+		return Todo{}, fmt.Errorf("placement 必须为 first 或 last")
+	}
+	appendToGroup := placement == "last" || (placement == "" && source == "agent")
+	status, priority := normalizeStatus(in.Status), normalizePriority(in.Priority)
 	now := time.Now().UnixMilli()
 	a.mu.Lock()
 	sourceID := strings.TrimSpace(in.SourceMessageID)
@@ -418,16 +424,21 @@ func (a *App) addTodo(in TodoInput, source, actor string) (Todo, error) {
 	}
 	position := 0
 	for _, sibling := range a.state.Todos {
-		if sibling.ParentID == parentID {
+		if sibling.ParentID != parentID {
+			continue
+		}
+		if !appendToGroup {
 			position = min(position, sibling.Position-1)
+		} else if sibling.Status == status && (parentID != "" || sibling.Priority == priority) {
+			position = max(position, sibling.Position+1)
 		}
 	}
 	t := Todo{
 		ID:              uuid.NewString(),
 		Title:           title,
 		Notes:           notes,
-		Status:          normalizeStatus(in.Status),
-		Priority:        normalizePriority(in.Priority),
+		Status:          status,
+		Priority:        priority,
 		Source:          source,
 		SessionID:       a.state.DSH.SessionID,
 		CreatedAt:       now,
@@ -1000,6 +1011,7 @@ func (a *App) journalPage(beforeAt int64, limit int, query string) JournalPage {
 
 const agentsBegin = "<!-- todolist-agent:begin -->"
 const agentsEnd = "<!-- todolist-agent:end -->"
+const todoPlacementRule = `从日常表达提炼的新待办默认追加到对应优先级组末尾，子任务追加到该父任务的同状态子任务末尾。用户直接指挥新增时可传 placement:"first" 沿用前插，有明确位置要求时按要求传 first 或 last。`
 
 func (a *App) agentsBlock() string {
 	url := ""
@@ -1023,6 +1035,7 @@ func (a *App) agentsBlock() string {
 		"处理规则：",
 		"- 只把**明确的行动意图**（想做、要做、记一下、提醒我、推进某事）提炼成任务；纯情绪/感慨/分享不要自动建任务，可以简短回应或问一句是否需要记下。",
 		"- 一条消息有多个行动点就拆成多个任务；一个行动点不要拆碎。",
+		"- " + todoPlacementRule,
 		"- 任务支持一层子任务：`add` 时传 `parentId` 即可；子任务不能再有子任务。只有当一个任务确实有 2-5 个明确步骤时才拆子任务，不要为了层级而层级。",
 		"- 长期跟踪、需要一直排在最前面但不紧急的任务用 `priority:\"pinned\"`（置顶 · 长期）；它排在 high 之前，但视觉上不抢高优先级。",
 		"- `GET /api/todos` 返回的每个任务有 `number` 字段（如 `2.4`），它就是打钩圆圈右侧的序号；用户用序号指代时按 `number` 精确找到 id，不要按数组下标猜。序号会随排序、优先级和状态变化，操作前重新 GET。",

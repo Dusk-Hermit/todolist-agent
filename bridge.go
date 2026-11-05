@@ -216,6 +216,7 @@ func (b *BridgeServer) handleJournal(w http.ResponseWriter, r *http.Request) {
 
 type bridgeAction struct {
 	Action          string  `json:"action"`
+	Placement       string  `json:"placement"`
 	ID              string  `json:"id"`
 	Title           *string `json:"title"`
 	Notes           *string `json:"notes"`
@@ -276,7 +277,7 @@ func (b *BridgeServer) handlePost(w http.ResponseWriter, r *http.Request) {
 		}
 		in := TodoInput{
 			Title: *act.Title, Status: statusTodo, Priority: priorityNormal, ParentID: act.ParentID,
-			SourceMessageID: act.SourceMessageID, SourceText: act.SourceText,
+			SourceMessageID: act.SourceMessageID, SourceText: act.SourceText, Placement: act.Placement,
 		}
 		if act.Notes != nil {
 			in.Notes = *act.Notes

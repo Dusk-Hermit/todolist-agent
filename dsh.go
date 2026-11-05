@@ -927,7 +927,7 @@ func (c *DSHClient) SendPrompt(text string, onboarding bool) (string, error) {
 		if !onboarding {
 			// Markdown hides HTML comments, while the model still receives the
 			// durable message id. The bridge can then record exact provenance.
-			contentText = text + "\n\n<!-- todo-msg:" + msg.ID + " -->"
+			contentText = todoPromptText(text, msg.ID)
 		}
 		args := map[string]any{
 			"request": map[string]any{
@@ -1025,6 +1025,7 @@ func (c *DSHClient) OnboardingText() string {
 		"1. 先 GET 列表，避免重复；相似的旧任务优先 update，不要重复 add。",
 		"2. 只把明确的行动意图（想做、要做、记一下、提醒我、推进某事）提炼成任务；纯情绪、感慨、分享不要自动建任务。可以简短回应，或问一句“要不要记成任务”。",
 		"3. 一条消息有多个行动点就拆成多个任务；一个行动点不要拆碎。",
+		"- " + todoPlacementRule,
 		"4. 任务支持一层子任务：`add` 时传 `parentId`；子任务不能再有子任务。只有当一个任务确实有 2-5 个明确步骤时才拆子任务，不要为了层级而层级。",
 		"5. 长期跟踪、需要一直排在最前面但不紧急的任务用 `priority:\"pinned\"`（置顶 · 长期）；它排在 high 之前，但视觉上不抢高优先级。",
 		"6. `GET /api/todos` 返回的每个任务有 `number` 字段（如 `2.4`），它就是打钩圆圈右侧的序号；用户用序号指代时按 `number` 精确找到 id，不要按数组下标猜。序号会随排序、优先级和状态变化，操作前重新 GET。",

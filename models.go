@@ -2,7 +2,7 @@ package main
 
 const (
 	appName    = "TodoList Agent"
-	appVersion = "0.4.2"
+	appVersion = "0.4.3"
 	appID      = "Dusk.TodoListAgent"
 
 	statusTodo    = "todo"
@@ -191,6 +191,7 @@ type StatePayload struct {
 }
 
 type TodoInput struct {
+	Placement       string `json:"placement"`
 	Title           string `json:"title"`
 	Notes           string `json:"notes"`
 	Priority        string `json:"priority"`

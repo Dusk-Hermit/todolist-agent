@@ -231,7 +231,7 @@ func (c *DSHClient) pumpQueue(ctx context.Context, selected *sessionRow, session
 	a.emitState()
 
 	raw, err := c.call(ctx, "session/prompt", promptArgs(item.ID, active.Session,
-		item.Text+"\n\n<!-- todo-msg:"+item.ID+" -->"))
+		todoPromptText(item.Text, item.ID)))
 	if err != nil {
 		// The request may have reached DSH before a transport failure.
 		// Keep the claim and reconcile it from session activity.
@@ -293,6 +293,10 @@ func promptArgs(id, session, text string) map[string]any {
 		"content":        []map[string]any{{"type": "text", "text": text}},
 		"clientTimeZone": clientTimeZone(),
 	}}
+}
+
+func todoPromptText(text, id string) string {
+	return text + "\n\n<!-- TodoList 排序规则：" + todoPlacementRule + " -->\n<!-- todo-msg:" + id + " -->"
 }
 
 func (a *App) updateQueuedMessage(active *activePrompt, status, reason string) {

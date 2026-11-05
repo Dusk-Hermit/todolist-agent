@@ -66,6 +66,7 @@ A task can have subtasks when the work genuinely has steps, for example “prepa
 - A focused task gets the full-card highlight, a rose border, and a sage-green bold title.
 - Tasks are ordered into **Pinned · Long-term**, **High**, **Normal**, and **Low** bands.
 - Dragging a task into another band changes its priority; dragging inside a band changes its order.
+- Tasks DSH extracts from everyday input go at the end of their priority band. DSH can use `placement: "first"` when the user asks to put a task first.
 - Each task has a small display number (`2.4`) next to the checkbox. DSH can use that number to refer to a task precisely.
 
 ### Journal and activity history
