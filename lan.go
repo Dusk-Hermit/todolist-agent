@@ -64,15 +64,16 @@ type lanService struct {
 	server                  *http.Server
 	client                  *http.Client
 
-	refreshMu  sync.Mutex
-	syncedHost string // only accessed while refreshMu is held
-	mu         sync.Mutex
-	lastPull   time.Time
-	peers      []lanPeer
-	discovered map[string]lanSighting
-	wake       chan struct{}
-	discovery  *lanDiscovery
-	workers    sync.WaitGroup
+	refreshMu          sync.Mutex
+	syncedHost         string // only accessed while refreshMu is held
+	mu                 sync.Mutex
+	lastPull           time.Time
+	lastDiscoveryReply time.Time
+	peers              []lanPeer
+	discovered         map[string]lanSighting
+	wake               chan struct{}
+	discovery          *lanDiscovery
+	workers            sync.WaitGroup
 }
 
 type lanSighting struct {
@@ -304,6 +305,12 @@ func (s *lanService) handleEnqueue(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "无效的 DSH 队列请求", http.StatusBadRequest)
 		return
 	}
+	for _, p := range pending {
+		if p.Host != "" && p.Host != s.id {
+			http.Error(w, "消息已指派给其他设备", http.StatusConflict)
+			return
+		}
+	}
 	if err := s.app.enqueuePrompts(pending); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -365,12 +372,19 @@ func (s *lanService) probePeers(addresses map[string]bool) ([]lanPeer, error) {
 		err  error
 	}
 	results := make([]result, len(addrs))
+	jobs := make(chan int, len(addrs))
+	for i := range addrs {
+		jobs <- i
+	}
+	close(jobs)
 	var workers sync.WaitGroup
-	for i, addr := range addrs {
+	for range min(16, len(addrs)) {
 		workers.Go(func() {
-			ctx, cancel := context.WithTimeout(s.ctx, 3*time.Second)
-			defer cancel()
-			results[i].err = s.requestContext(ctx, "GET", addr, "/info", nil, &results[i].info)
+			for i := range jobs {
+				ctx, cancel := context.WithTimeout(s.ctx, 3*time.Second)
+				results[i].err = s.requestContext(ctx, "GET", addrs[i], "/info", nil, &results[i].info)
+				cancel()
+			}
 		})
 	}
 	workers.Wait()
@@ -444,7 +458,7 @@ func (s *lanService) refresh(manual bool) (int, error) {
 	s.mu.Lock()
 	addresses := make(map[string]bool)
 	for id, p := range s.discovered {
-		if time.Since(p.at) > 18*time.Second {
+		if time.Since(p.at) > lanSightingTTL {
 			delete(s.discovered, id)
 		} else {
 			addresses[p.address] = true

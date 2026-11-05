@@ -7,11 +7,18 @@ import (
 	"net"
 	"net/netip"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
 
 var discoveryGroup = &net.UDPAddr{IP: net.IPv4(224, 0, 0, 167), Port: lanPort}
+
+const (
+	lanSightingTTL                 = 18 * time.Second
+	maxDiscoverySightings          = 32
+	maxDiscoveryAddressesPerDevice = 4
+)
 
 type lanAnnouncement struct {
 	ID       string `json:"id"`
@@ -155,16 +162,45 @@ func (d *lanDiscovery) listen(socket *net.UDPConn) {
 			continue
 		}
 		address := net.JoinHostPort(src.Addr().String(), strconv.Itoa(a.Port))
-		s.mu.Lock()
-		key := a.ID + "|" + address
-		prev := s.discovered[key]
-		s.discovered[key] = lanSighting{address: address, at: time.Now()}
-		s.mu.Unlock()
-		if prev.address != address {
+		isNew, reply := s.recordSighting(a.ID, address, a.Announce, time.Now())
+		if isNew {
 			s.signal()
 		}
-		if a.Announce {
+		if reply {
 			d.announce(false)
 		}
 	}
+}
+
+func (s *lanService) recordSighting(id, address string, announce bool, now time.Time) (isNew, reply bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	prefix := id + "|"
+	key := prefix + address
+	for key, sighting := range s.discovered {
+		if now.Sub(sighting.at) > lanSightingTTL {
+			delete(s.discovered, key)
+		}
+	}
+	_, existing := s.discovered[key]
+	if !existing {
+		if len(s.discovered) >= maxDiscoverySightings {
+			return false, false
+		}
+		deviceAddresses := 0
+		for key := range s.discovered {
+			if strings.HasPrefix(key, prefix) {
+				deviceAddresses++
+			}
+		}
+		if deviceAddresses >= maxDiscoveryAddressesPerDevice {
+			return false, false
+		}
+	}
+	s.discovered[key] = lanSighting{address: address, at: now}
+	if announce && now.Sub(s.lastDiscoveryReply) >= 250*time.Millisecond {
+		s.lastDiscoveryReply = now
+		reply = true
+	}
+	return !existing, reply
 }
