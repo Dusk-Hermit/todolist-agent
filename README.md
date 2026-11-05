@@ -2,7 +2,7 @@
 
 **A local-first Windows todo list that turns messy thoughts into an executable list with DeepSeek Harness.**
 
-[English](README.md) · [简体中文](README.zh-CN.md)
+[English](README.md) · [简体中文](README.zh-CN.md) · [Watch the demo](https://www.bilibili.com/video/BV1PR486wEGL/)
 
 TodoList Agent is a small desktop application built with **Go + WebView2**. It connects to a dedicated **DeepSeek Harness (DSH)** session, so the things you type at the bottom of the window can be understood, split into tasks, and kept in sync with the agent.
 
@@ -11,6 +11,16 @@ The important part is not that it is another todo app. It is a place where you c
 <p align="center">
   <img src="docs/main.png" width="72%" alt="TodoList Agent main window" />
 </p>
+
+## Demo
+
+<p align="center">
+  <a href="https://www.bilibili.com/video/BV1PR486wEGL/">
+    <img src="docs/bilibili-cover.png" width="80%" alt="TodoList Agent demo on Bilibili" />
+  </a>
+</p>
+
+A 60-second walkthrough on Bilibili: starting from an empty list, three rounds of conversation with DSH, task extraction, subtasks, focus, checkbox completion, and the journal / activity panels.
 
 ## Why this exists
 

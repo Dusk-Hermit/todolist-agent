@@ -2,7 +2,7 @@
 
 **一个本地优先的 Windows 桌面清单，把杂乱想法交给 DeepSeek Harness，变成真正能执行的待办。**
 
-[English](README.md) · [简体中文](README.zh-CN.md)
+[English](README.md) · [简体中文](README.zh-CN.md) · [观看演示](https://www.bilibili.com/video/BV1PR486wEGL/)
 
 TodoList Agent 是一个用 **Go + WebView2** 编写的桌面应用。它连接一个专用的 **DeepSeek Harness（DSH）** 会话，让你可以直接在窗口底部写下此刻的想法，由 DSH 理解、拆解，并通过本地接口同步成任务。
 
@@ -11,6 +11,16 @@ TodoList Agent 是一个用 **Go + WebView2** 编写的桌面应用。它连接�
 <p align="center">
   <img src="docs/main.png" width="72%" alt="TodoList Agent 主界面" />
 </p>
+
+## 演示视频
+
+<p align="center">
+  <a href="https://www.bilibili.com/video/BV1PR486wEGL/">
+    <img src="docs/bilibili-cover.png" width="80%" alt="TodoList Agent B站演示视频" />
+  </a>
+</p>
+
+B站 60 秒功能演示：从空清单开始，连续三轮对话，看 DSH 如何拆任务、处理子任务与专注，以及想法回顾和操作记录。
 
 ## 为什么做这个
 
