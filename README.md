@@ -1,432 +1,306 @@
 # TodoList Agent
 
-一个用 **Go + WebView2** 写的 Windows 长期桌面清单，和当前正在运行的 **DeepSeek Harness（DSH）会话**双向联动：
+**A local-first Windows todo list that turns messy thoughts into an executable list with DeepSeek Harness.**
 
-- 在桌面输入框里写想法 → 消息进入 DSH 会话，DSH 里能看到完整的工作过程和输出。
-- 你的输入可以很杂：想法、计划、微信式自言自语、感慨、转述、链接。DSH 只把**明确的行动意图**提炼成任务；纯情绪不会自动变成待办。
-- 任务支持**一层子任务**：一个任务可以拆成多个子 todo，父任务显示完成进度；子任务不能再往下嵌套。
-- DSH 可以通过本地接口新增、修改、开始、完成、**丢弃**任务；每条输入原文、时间、关联任务都保存在「想法回顾」里。
-- 浅色暖纸配色，灵感来自参考图的灰粉 / 鼠尾草绿 / 米白；任务很多时可以切换**紧凑列表**。
-- **打开即用**：首次启动会自动发现本机 DSH，创建一个名为 `TodoList · DSH 联动` 的专用会话，而不是占用你正在聊的会话。
-- 不截图、不模拟键盘、不另起 DSH 进程；直接走 DSH 自己的本地 Web API。
+[English](README.md) · [简体中文](README.zh-CN.md)
 
-![主界面](docs/main.png)
+TodoList Agent is a small desktop application built with **Go + WebView2**. It connects to a dedicated **DeepSeek Harness (DSH)** session, so the things you type at the bottom of the window can be understood, split into tasks, and kept in sync with the agent.
+
+The important part is not that it is another todo app. It is a place where you can think out loud: fragments, complaints, links, half-finished plans, and the occasional “I should really do this”. DSH only turns **explicit action intentions** into tasks. The original words stay in a searchable journal, together with the tasks they produced.
+
+![TodoList Agent main window](docs/main.png)
+
+## Why this exists
+
+Most todo apps assume you already know what the task is. Real life usually starts earlier than that: you have a vague thought, a deadline buried in a sentence, or five things mixed into one paragraph.
+
+TodoList Agent moves that first step into the desktop:
+
+- you write the thought where it appears;
+- DSH reads it in a real conversation and extracts the action;
+- the result comes back as a clean task, with the original quote still attached;
+- you can refine, focus, split, drop, or finish it without leaving the window.
+
+Everything runs locally. The app does not take screenshots, simulate a keyboard, or start a second DSH process. It talks to DSH's own local Web API.
+
+## Features
+
+### A real DSH conversation, not a one-way form
+
+- The app discovers the running DSH instance on your machine.
+- On first launch it creates a dedicated session named `TodoList · DSH 联动` and reuses it later.
+- Messages you send appear in DSH as normal user messages, so the agent sees the full context and can reply.
+- DSH can update the list through a local bridge API: add, update, start, complete, drop, reopen, and delete.
+
+### Messy input, explicit tasks
+
+- A message may contain several actions; DSH can create several tasks from one thought.
+- Pure emotion, commentary, and link sharing do not have to become tasks.
+- When a message contains a deadline (“tonight”, “before Friday”, “this weekend”), the time is written into the **task title**, not buried in notes.
+- Reopening or editing a task preserves the original wording and its source.
+
+### One level of subtasks
+
+A task can have subtasks when the work genuinely has steps, for example “prepare a talk” → outline / examples / screenshots.
+
+- Parent tasks show progress such as `2/3`.
+- Subtasks have their own status and can be completed or dropped independently.
+- Subtasks cannot be nested further; the tree stays at one level.
+- Deleting a parent task deletes its subtasks after a confirmation.
+
+### Focus, priority bands, and ordering
+
+- Exactly zero or one top-level task can be focused at a time.
+- A focused task gets the full-card highlight, a rose border, and a sage-green bold title.
+- Tasks are ordered into **Pinned · Long-term**, **High**, **Normal**, and **Low** bands.
+- Dragging a task into another band changes its priority; dragging inside a band changes its order.
+- Each task has a small display number (`2.4`) next to the checkbox. DSH can use that number to refer to a task precisely.
+
+### Journal and activity history
+
+Every message sent from the desktop composer is stored as a **journal entry**, even if it never becomes a task.
+
+- Search old thoughts or task titles.
+- See which tasks were created from a thought.
+- Jump from a task back to its source message.
+- Switch to **Activity** to see additions, completions, drops, moves, and their original quotes.
+
+### Built for a long list
+
+- Card view for context and subtasks.
+- Compact view for scanning dozens or hundreds of tasks by status and priority.
+- Completed and dropped groups collapse by default.
+- Tray support and a light warm-paper theme designed to stay on screen for a long time.
 
 <p>
-<img src="docs/compact.png" width="46%" alt="紧凑列表" />
-<img src="docs/journal.png" width="46%" alt="想法回顾" />
+  <img src="docs/compact.png" width="48%" alt="Compact task list" />
+  <img src="docs/journal.png" width="48%" alt="Thought journal" />
 </p>
-
 <p>
-<img src="docs/settings.png" width="46%" alt="设置" />
-<img src="docs/task.png" width="46%" alt="任务编辑" />
+  <img src="docs/settings.png" width="48%" alt="Settings" />
+  <img src="docs/task.png" width="48%" alt="Task editor" />
 </p>
 
-## 这一版针对“长期、杂乱输入”做了什么
+## Requirements
 
-### 1. 内置任务整理规则
+- **Windows 10/11 (64-bit)**
+- **Microsoft Edge WebView2 Runtime** (normally included with Windows 11)
+- **DeepSeek Harness** installed and running locally
 
-接入说明和 `AGENTS.local.md` 明确要求 DSH：
+The app is currently developed against **DSH 0.2.x** and **TodoList Agent 0.2.9**.
 
-- 先 `GET /api/todos` 查重；
-- 只把「想做、要做、记一下、提醒我、推进某事」提炼成任务；
-- 纯感慨 / 吐槽 / 转述 / 链接分享不自动建任务，可以简短回应或问一句；
-- 一条消息有多个行动点就拆成多个任务，一个行动点不要拆碎；
-- 任务最多一层子任务：`add` 时传 `parentId`；只有当一个任务确实有 2-5 个明确步骤时才拆子任务；
-- 长期跟踪、需要一直排在最前面但不紧急的任务用 `priority:"pinned"`（置顶 · 长期）；
-- 用户说「关掉 / 做完了 / 搞定」→ `complete`；
-- 用户说「不做了 / 算了 / 放弃 / 搁置 / 丢弃」→ `drop` 并记录原因；
-- 只有明确说「删除 / 删掉」才 `delete`；
-- 想法里有明确时间 / 期限时，把时间写进**任务标题**，不要只写在 notes；例如「周五前交开题报告」「周末去看展」；
-- 修改标题时必须保留旧标题的核心动作、对象和关键限定，再融入修改意见；改完自检「只看新标题能否知道要做什么？」不能就补回旧信息；
-- 任务 `notes` 保留原话，不要过度改写；
-- 回复只汇报实际变更，不要只列计划。
+## Install
 
-### 2. 一层子任务
+### From a release
 
-父任务下可以建立多个子 todo，适合“准备分享 → 截图 / 大纲 / 例子”这种有明确步骤的事情：
+Download `TodoListAgent-win64.zip` from the [latest release](https://github.com/Dusk-Hermit/todolist-agent/releases/latest).
 
-- 父任务显示 `1/4 子任务` 的完成进度；
-- 子任务有独立的完成 / 丢弃状态，完成后父任务不会自动完成；
-- 子任务不能再建子任务（只支持一层），避免清单变成无限深的树；
-- 卡片模式在父任务里展开子任务；紧凑模式用缩进跟随父任务；
-- 删除父任务会连同子任务一起删除，删除前会提示数量；
-- DSH 通过 `add` 的 `parentId` 创建子任务，界面上的 `+ 添加子任务` 也可以直接建。
+1. Extract the archive.
+2. Run `install.cmd`, or from PowerShell:
 
-### 3. 想法回顾（Journal）
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+   ```
 
-每条通过桌面输入框发出的原文都会单独保存，包括没有变成任务的感慨。侧边栏「想法回顾」支持：
+3. Launch **TodoList Agent** from the Start menu.
 
-- 按时间倒序查看全文；
-- 搜索旧想法或任务标题；
-- 看每条想法关联了哪些任务；
-- 从任务详情里跳回「来源想法」。
+The installer places the app in `%LOCALAPPDATA%\Programs\TodoList Agent` and creates a Start menu shortcut.
 
-应用发出的接入说明不会进入想法回顾，也不会把 API Token 当作任务的来源文本。
+### Portable
 
-### 4. 来源追踪
+`TodoListAgent.exe` is a single executable. Put it anywhere and run it. No installer is required.
 
-普通输入发送时会在消息末尾附带一个 Markdown 隐藏标记：
+## First run
+
+1. Start **DeepSeek Harness**.
+2. Launch **TodoList Agent**.
+3. The app discovers DSH and selects or creates the dedicated session `TodoList · DSH 联动`.
+4. Click **让 DSH 维护这份清单** once and send the onboarding message. This gives DSH the local bridge URL, token, and the task-handling rules.
+5. Optionally let the app write the managed block into `AGENTS.local.md`, so a long-running DSH session keeps the rules after compaction.
+
+From then on:
+
+- Type a thought in the composer and press `Enter`.
+- DSH reads the message and updates the list through the local API.
+- Use the task actions to edit, split, drop, finish, or focus.
+
+## Daily use
+
+| Action | Result |
+|---|---|
+| `Enter` | Send the thought to DSH |
+| `Shift+Enter` | New line |
+| `Ctrl+N` | Create a local task |
+| `Ctrl+,` | Open settings |
+| Click the checkbox | Complete / reopen a task |
+| Click a task title | Open the task editor |
+| Click the target icon | Focus / unfocus a task |
+| Drag a task | Reorder, or move it to another priority band |
+| Book icon | Open the thought journal |
+| Clock icon | Open activity history |
+| List / grid icon | Switch card and compact views |
+
+## How it works
+
+### DSH discovery and identity
+
+The app tries DSH addresses in this order:
+
+1. `DSH_WEB_URL`, if set;
+2. the last address that worked;
+3. `http://127.0.0.1:13848`;
+4. a local port scan in `127.0.0.1:13800–13920`, validated with `session/list`.
+
+To authenticate, it reads the `client-connection/browser-session` secret from `%USERPROFILE%\.dsh\.credentials.yaml` and mints the same short-lived session cookie DSH uses for its own Web UI. The secret never leaves the machine and is not written into task data.
+
+### The dedicated session
+
+If no dedicated session is remembered, the app calls `session/create`, renames the new session to `TodoList · DSH 联动`, and selects it. The session's working directory follows the currently running DSH session when possible; otherwise it uses the most recently active session.
+
+Existing conversations are never hijacked. A **New dedicated session** action is available in Settings.
+
+### Sending a thought
+
+The composer sends a normal `session/prompt` request. A hidden marker is appended to the message:
 
 ```html
 <!-- todo-msg:<id> -->
 ```
 
-DSH 会把它作为 `sourceMessageId` 传给本地接口；应用据此把任务、历史事件和原始想法关联起来。即使 DSH 没有传，应用也会在 6 小时内把 Agent 新建的任务回退关联到最近一条用户输入。
+DSH passes it back as `sourceMessageId`, which is how the app links a task, its activity events, and the original journal entry. If DSH omits the marker, the app can still attach newly created tasks to the most recent user message within a six-hour window.
 
-### 5. 丢弃而不是删除
+### The reverse bridge
 
-`dropped` 是独立状态，不会从历史里消失：
+The app listens on `127.0.0.1:17890` (configurable) with a random bearer token. The URL and token are written to `%APPDATA%\TodoListAgent\bridge.json`.
 
-- 卡片模式下排在最底部并淡化；
-- 紧凑模式下收进「已丢弃」分组；
-- 可按「丢弃」筛选查看；
-- 任务详情里保留 `dropReason`，可以重新打开或彻底删除。
+DSH can then call:
 
-### 6. 紧凑列表
+```http
+GET  /api/todos
+GET  /api/journal?limit=20&q=keyword
 
-工具栏右侧的列表/网格按钮切换视图：
-
-- 一行一个任务，按「进行中 / 待办 / 已完成 / 已丢弃」分组；
-- 已完成、已丢弃默认折叠，只显示数量；
-- 点击分组标题展开/收起；
-- 适合积累几十上百条任务后快速浏览。
-
-### 7. 打开即用：自动发现 DSH + 专用会话
-
-普通用户第一次打开应用时不需要先手动选会话：
-
-1. 应用发现本机 DSH，读取会话列表；
-2. 如果没有已保存的目标会话，调用 `session/create` 创建一个新的普通会话；
-3. 把它重命名为 `TodoList · DSH 联动` 并选中；
-4. 新会话的工作目录优先取“当前正在运行的 DSH 会话”的目录；没有运行中的会话时取最近活跃会话的目录；
-5. 之后每次启动都复用这个专用会话，不会占用你正在聊的会话。
-
-如果专用会话被删了，或者你想重新开始，设置页有 **「新建专用会话」** 按钮。开发时如果显式设置了 `DSH_SESSION_ID`，应用会优先使用它，方便调试。
-
-### 8. 优先级分栏与拖动
-
-「待办」内部按优先级分成置顶 · 长期 / 高 / 中 / 低四段，中间有分割线：
-
-- **置顶 · 长期**：排在最前面，但用灰褐色虚线、正常字重和低对比度，故意不抢眼；
-- **高优先级**：灰粉标题 + 轻微玫瑰色底，标题加粗，视觉上最醒目；
-- **中优先级**：默认深棕标题，正常字重；
-- **低优先级**：鼠尾草绿细边，标题降低字重和对比度，不抢注意力；
-- 把待办卡片拖到另一段，会自动改变它的优先级；
-- 同一段内上下拖动只调整顺序，不改优先级；
-- 拖到段标题上表示放到该段顶部；
-- 拖拽只作用于顶层待办；子任务不参与排序。
-
-这个排序会写回本地 `position` 和 `priority`，并记录一条 `todo.move` 操作历史。
-
-### 9. 序号引用
-
-每个任务在打钩圆圈右侧有一个非常小的序号：
-
-- 顶层任务按当前列表顺序编号为 `1`、`2`、`3`……；
-- 子任务编号为 `2.4`，表示第 2 个顶层任务的第 4 个子任务；
-- 序号会随着拖动、优先级、完成/丢弃状态重新计算；
-- `GET /api/todos` 的每个任务都带 `number` 字段，DSH 必须按 `number` 精确匹配，不要按数组下标猜。
-
-所以可以直接对 DSH 说：
-
-```text
-把 2.4 标记完成
-把 3 改成高优先级
-给 1.2 加一句备注
+POST /api/todos
 ```
 
-DSH 会先取最新列表，用 `number` 找到对应 `id` 再操作。
+Example actions:
 
-### 10. 标题里的时间和修改规则
+```json
+{"action":"add","title":"周五前准备下周的分享","priority":"high","sourceMessageId":"..."}
+{"action":"update","id":"...","title":"...","status":"doing"}
+{"action":"complete","id":"..."}
+{"action":"drop","id":"...","reason":"暂时不做了"}
+```
 
-内置 prompt 现在强制两个容易犯错的点：
+`GET /api/todos` includes a display-only `number` field (`2.4`) that DSH can use when the user refers to a task by number.
 
-1. **说了时间就写进标题**
-   - 「今晚把周报发了」→ 标题「今晚发周报」
-   - 「周五前交开题报告」→ 标题「周五前交开题报告」
-   - 「周末想去看展」→ 标题「周末去看展」
-   - 「以后有空再整理」不硬塞时间。
-2. **改标题不能丢掉原信息**
-   - 旧标题「整理分享用的演示截图」
-   - 用户说「改成从录屏里挑」
-   - 正确新标题：「从录屏里挑分享用演示截图」
-   - 错误新标题：「从录屏里挑」——只看标题已经不知道要挑什么、为什么挑。
+## Task model
 
-改标题时 DSH 要先保留旧标题的核心动作、对象和关键限定，再融入修改意见；改完自检一次：**只看新标题，能不能知道这条待办要做什么？** 不能就补回旧信息。
+### Status
 
-### 11. 备注结构
+`todo` → `doing` → `done`
 
-`notes` 固定为两段，中间用单独一行 `-------` 分隔：
+A task can also be `dropped`. Dropping is intentionally different from deleting:
+
+- dropped tasks stay in history;
+- they are grouped separately and can be filtered;
+- they keep the reason and original words;
+- they can be reopened or permanently deleted.
+
+### Notes format
+
+Task notes have a stable shape:
 
 ```text
-{{这个事项的详细描述，信息量要充足}}
+{{current detailed description}}
 
 -------
 
-- {{最新原话}}
-- {{较早原话}}
-- {{更早原话}}
+- {{newest original quote}}
+- {{older original quote}}
 ```
 
-规则：
+The description is rewritten as the task evolves. Original quotes are only appended, newest first. This keeps the actionable summary at the top while preserving the user's own wording below.
 
-- 详细描述要写清目标、背景、做法、范围、判断标准等，不要只写一句；
-- 每次修改任务时，详细描述要**重写**成和当前任务一致；
-- 原话只追加，不改写、不删除；
-- 新原话追加到原话区**最上面**，旧原话依次往下；
-- 所有原话都集中在 `-------` 下面，不能混进详细描述；
-- 备注总长控制在 2000 字内，原话很多时保留最相关的。
+### Display numbers
 
-这样任务详情上半部分始终是最新的、可执行的信息，下半部分才是历史原话。
+Numbers are computed from the current order and are never persisted:
 
-### 12. 专注当前任务
+- top-level tasks: `1`, `2`, `3`, …;
+- subtasks: `2.4`, meaning the fourth subtask of the second top-level task.
 
-每个顶层待办的操作区新增一个 **靶心按钮**：
+Numbers change when tasks move, so DSH should re-read `GET /api/todos` before acting on a number.
 
-- 全局最多只有一个「专注」任务，也可以一个都没有；
-- 点击后整个待办卡片高亮，并显示「专注」标签；
-- 点击另一个任务的靶心，焦点会自动切换过去；
-- 再点一次当前专注任务，取消专注；
-- 专注状态会持久化，重启应用后仍然保留；
-- 任务完成、丢弃或删除时，焦点自动清空；
-- 专注只加高亮，不会改变任务排序；
-- 子任务不参与专注，只支持顶层待办。
+## Data and privacy
 
-## 连接设计（核心）
+| Path | Contents |
+|---|---|
+| `%APPDATA%\TodoListAgent\data.json` | Tasks, journal entries, activity events, preferences, bridge token |
+| `%APPDATA%\TodoListAgent\bridge.json` | Local bridge URL and bearer token |
+| `%APPDATA%\TodoListAgent\icon.ico` | Runtime window icon |
 
-DSH 桌面版本质上是一个 Electron 外壳 + Cordis 宿主，Web GUI 在 `http://127.0.0.1:<port>` 上提供本地 API，默认 `13848`。这个 API 只接受由 DSH 自己签发的会话 Cookie。
+- Data stays on the local machine.
+- The bridge binds to loopback only.
+- Credentials are read from DSH's own local credential file and are never included in task text or journal entries.
+- The app does not capture the screen, control the keyboard, or automate the DSH UI.
 
-应用按以下方式接入**当前会话**：
+## Build from source
 
-1. **发现 DSH**
-   - 依次尝试环境变量 `DSH_WEB_URL`、上次保存的地址、`http://127.0.0.1:13848`。
-   - 都失败时并发扫描 `127.0.0.1:13800-13920`，用 `session/list` 验证。
+Requirements:
 
-2. **本地身份**
-   - 读取 `%USERPROFILE%\.dsh\.credentials.yaml` 里的 `client-connection/browser-session` 签名密钥。
-   - 按 DSH 的格式签发一个 `v1` Cookie：`HMAC-SHA256(secret, body)`，绑定 `host:port`，有效期 29 天。
-   - Cookie 只在本机使用，不写入 DSH 的浏览器存储，也不依赖 `dsh web` 启动时打印的 token。
+- Go 1.26+
+- `rsrc` for embedding the Windows icon
+- Windows SDK/WebView2 development environment
 
-3. **拿到专用会话**
-   - `POST /api/session/list` 读取所有会话。
-   - 优先使用已保存的专用会话；没有时调用 `session/create`，重命名为 `TodoList · DSH 联动` 并选中。
-   - `DSH_SESSION_ID` 只在开发调试时作为显式覆盖。
-   - 设置页可以在全部会话中切换目标，或点「新建专用会话」。
+```powershell
+git clone https://github.com/Dusk-Hermit/todolist-agent.git
+cd todolist-agent
+.\build.ps1
+```
 
-4. **发送输入**
-   - `POST /api/session/prompt`，请求体形如：
-     ```json
-     {
-       "type": "client-request",
-       "rpcId": "<uuid>",
-       "method": "session/prompt",
-       "payload": {
-         "args": {
-           "request": {
-             "requestId": "<uuid>",
-             "sessionId": "session-...",
-             "mode": "queue",
-             "content": [{ "type": "text", "text": "你的想法\n\n<!-- todo-msg:<id> -->" }],
-             "clientTimeZone": "Asia/Shanghai"
-           }
-         }
-       }
-     }
-     ```
-   - 消息会作为真实的用户消息进入该会话；DSH 里能看到它，并正常开始一轮工作。
-   - 轮询 `session/list` 获取 `running`、轮次、最近一轮的回复摘要，用于桌面状态条。
+The build script closes a running copy, compiles the embedded web UI, embeds the icon and manifest, and writes `dist\TodoListAgent.exe` and `dist\TodoListAgent-win64.zip`.
 
-5. **反向更新清单**
-   - 应用在 `127.0.0.1:17890` 起一个只监听本机的小型 HTTP 服务，随机 Bearer Token 鉴权。
-   - 地址和 Token 写入 `%APPDATA%\TodoListAgent\bridge.json`。
-   - DSH 通过 `POST /api/todos` 执行：
-     ```json
-     {"action":"add","title":"...","notes":"...","priority":"pinned|high|normal|low","parentId":"...","sourceMessageId":"..."}
-     {"action":"update","id":"...","status":"todo|doing|done|dropped","dropReason":"..."}
-     {"action":"complete","id":"..."}
-     {"action":"drop","id":"...","reason":"..."}
-     {"action":"reopen","id":"..."}
-     {"action":"delete","id":"..."}
-     ```
-   - `GET /api/journal?limit=20&q=关键词` 用于回看旧想法及关联任务。
-   - “让 DSH 管理清单”会发送一次接入说明，并可选择写入工作区的 `AGENTS.local.md`。它是 DSH 的本地指令覆盖文件，不会污染共享的 `AGENTS.md`。
+```powershell
+# Build a specific version
+.\build.ps1 -Version 0.2.9
+```
 
-这样，输入方向和输出方向都走 DSH 自己的真实会话，不需要任何 UI 自动化。
-
-## 安装
-
-### 方式一：发布包
-
-发布包作为 [GitHub Release](https://github.com/Dusk-Hermit/todolist-agent/releases/latest) 附件提供；仓库本身不提交 `dist/`、`*.exe`、`*.syso`、`data.json`、`bridge.json` 或个人数据。
-
-1. 下载并解压 `TodoListAgent-win64.zip`。
-2. 双击 `install.cmd`，或在 PowerShell 中运行：
-   ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
-   ```
-3. 开始菜单出现 **TodoList Agent**。
-4. 在“设置 → 应用”中可以看到卸载入口。
-
-安装位置：`%LOCALAPPDATA%\Programs\TodoList Agent`
-
-### 方式二：直接运行
-
-`dist\TodoListAgent.exe` 是单文件程序，复制到任意目录即可运行。需要系统已安装 **Microsoft Edge WebView2 Runtime**（Windows 11 通常自带）。
-
-## 使用
-
-1. 启动 DeepSeek Harness（不需要先手动建会话）。
-2. 从开始菜单启动 TodoList Agent。首次启动会自动发现 DSH，创建并选中 `TodoList · DSH 联动` 专用会话。
-3. 第一次使用点底部的 **“让 DSH 维护这份清单”**：
-   - 会向专用会话发送一次接入说明（带本地 API 地址与 Token）。
-   - 可选写入 `AGENTS.local.md`，让 DSH 在长会话或压缩后仍然记得接口。
-   - 之后 DSH 会按需 `add / update / complete / drop`，桌面清单即时变化。
-4. 在底部输入框写想法，`Enter` 发送，`Shift+Enter` 换行。
-5. 想拆步骤时，点任务右侧的 **+** 或子任务区的 **“+ 添加子任务”**；父任务会显示 `1/4` 进度。
-6. 新建 / 编辑任务时优先级可选 **置顶 · 长期 / 高 / 中 / 低**。
-7. 待办卡片可以按住上下拖动：同段内改顺序，拖到置顶 / 高 / 中 / 低段会改优先级。
-8. 点任务操作区的**靶心按钮**专注当前任务；全局最多一个，再点一次取消。
-9. 点右上角图钉保持置顶；关闭窗口会最小化到托盘。
-10. 右上角 **书本图标** 打开「想法回顾」，**时钟图标** 打开「操作记录」。
-11. 工具栏的列表/网格按钮切换卡片 / 紧凑模式。
-12. 齿轮 → 设置：切换会话、新建专用会话、修改 DSH 地址、查看 Agent 接口、复制 curl 示例、复制诊断信息、退出。
-
-普通用户第一次使用的完整路径：
+## Project layout
 
 ```text
-安装包 -> 运行安装 -> 开始菜单打开
-                -> 自动发现 127.0.0.1:13848
-                -> 自动创建 TodoList · DSH 联动
-                -> 点“让 DSH 维护这份清单”
-                -> 开始输入
+app.go        application state, task operations, snapshots
+store.go      persistence and migration
+dsh.go        DSH discovery, dedicated session, prompt delivery
+bridge.go     local loopback API used by DSH
+window.go     WebView2 bindings and window lifecycle
+win32.go      Windows integration: title bar, icon, tray behavior
+web/          embedded HTML/CSS/JS interface
+install.ps1   per-user installer
+build.ps1     release build
+docs/         screenshots
 ```
 
-### 适合直接丢给 DSH 的输入
+## Design choices
 
-```
-今天好累，什么都不想干，先吐槽一下。
-对了，浅色主题的紧凑模式还要再调一下；旧的下载任务不做了，丢掉。
-周末想去看展，记一下。
-```
+- **Local first.** No account, no cloud sync, no background service beyond the loopback bridge.
+- **One level of nesting.** Enough structure for real work, without turning the list into an infinite tree.
+- **Drop is not delete.** Most abandoned tasks are not mistakes; they are decisions worth keeping.
+- **The original words stay.** Summaries are useful, but the source is often the most valuable context months later.
+- **A dedicated session.** The agent gets a stable place to work without taking over the conversation you are using.
 
-期望结果：
+## Limitations
 
-- 「今天好累」不建任务；
-- 新建「调整浅色主题的紧凑模式」；
-- 把「旧的下载任务」标记为 `dropped` 并写原因；
-- 新建「周末去看展」；
-- 两条新任务都能在「想法回顾」里找到来源原话。
+- Windows only.
+- Requires a running local DSH instance.
+- One level of subtasks by design.
+- The bridge is loopback-only; it is not designed for remote access.
+- DSH is a fast-moving project, so internal API changes may require an app update.
 
-带子任务的输入：
+## Credits
 
-```
-我想准备下周的分享，需要整理演示截图、写一页大纲，再找两个例子。
-这个算一个任务，下面拆成子任务吧。
-```
+- Built with [Go](https://go.dev/), [go-webview2](https://github.com/jchv/go-webview2), and [systray](https://github.com/getlantern/systray).
+- DSH integration is based on DeepSeek Harness's local web API.
+- The app's visual direction is inspired by warm paper, dusty rose, and sage green.
 
-期望结果：一条父任务「准备下周的分享」，加三条子任务；父任务显示 `0/3`，子任务完成后变成 `1/3`；子任务不能再嵌套。
+---
 
-### 快捷操作
-
-| 操作 | 效果 |
-|---|---|
-| `Enter` | 发送到 DSH |
-| `Shift+Enter` | 换行 |
-| `Ctrl+N` | 新建本地任务 |
-| `Ctrl+,` | 打开设置 |
-| `Esc` | 关闭弹层 |
-| 点击任务标题 | 编辑任务 |
-| 点击左侧圆圈 | 完成 / 重新打开 |
-| 点击分组标题 | 展开 / 收起紧凑分组 |
-
-## 数据、保留与隐私
-
-| 路径 | 内容 |
-|---|---|
-| `%APPDATA%\TodoListAgent\data.json` | 任务、历史、输入、偏好、桥接 Token |
-| `%APPDATA%\TodoListAgent\bridge.json` | 本地 Agent API 地址与 Token |
-| `%APPDATA%\TodoListAgent\WebView2\` | WebView2 缓存 |
-| `%APPDATA%\TodoListAgent\app.log` | 运行日志（超过 4MB 轮转） |
-| `<工作区>\AGENTS.local.md` | 可选的 DSH 本地指令块（由“让 DSH 管理清单”写入） |
-
-保留策略：
-
-- 原始想法最多保留 10,000 条；
-- 操作事件最多保留 20,000 条；
-- 桌面状态只加载最近 50 条输入和最近 1,000 条事件，避免界面被历史拖慢；
-- 「想法回顾」按页从本地数据读取，支持搜索和加载更早；
-- 接入说明不会进入想法回顾；旧版本已写入的接入说明会在加载时迁移清理。
-
-安全边界：
-
-- DSH 签名密钥只读不写；Cookie 只发往 `127.0.0.1` 的 DSH 端口。
-- Agent API 只监听 `127.0.0.1`，使用随机 Token。
-- Token 会出现在 `bridge.json` 和接入说明消息里；不要把这些内容发到公开渠道。
-- 应用不联网，不上传任何数据。
-
-## 仓库卫生
-
-这个仓库只放源码、脚本、图标和文档截图，不放构建产物或个人运行数据：
-
-- `dist/`、`*.exe`、`*.syso`、`*.zip`：构建产物，已忽略；
-- `AGENTS.local.md`：应用在你的工作区生成的本地 DSH 指令，已忽略；
-- `data.json`、`bridge.json`、`*.log`：本地任务数据、桥接 Token 和日志，已忽略；
-- 截图只截应用窗口本身，保存在 `docs/`，用于 README；
-- 发布包通过 GitHub Release 附件分发，不提交进 git。
-
-## 构建
-
-环境：
-
-- Windows 10/11 x64
-- Go 1.26+（构建脚本会优先使用 `%LOCALAPPDATA%\go-toolchain\go`，并允许自动下载 toolchain）
-- Microsoft Edge WebView2 Runtime
-- `rsrc`（首次构建自动安装）
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
-```
-
-产物：
-
-- `dist\TodoListAgent.exe`
-- `dist\TodoListAgent-win64.zip`
-
-开发调试：
-
-```powershell
-# 打开 WebView2 的 DevTools 与右键菜单
-$env:TODOLIST_AGENT_DEBUG = "1"
-.\dist\TodoListAgent.exe
-```
-
-## 目录结构
-
-```
-.
-├── main.go            # 入口、单实例、日志
-├── app.go             # 状态、任务变更、丢弃、历史、想法回顾、AGENTS.local.md
-├── store.go           # 数据目录、加载、迁移、原子写入
-├── dsh.go             # DSH 发现、Cookie、session/list、session/prompt、轮询
-├── bridge.go          # 本地 Agent API（127.0.0.1，含 journal）
-├── window.go          # WebView2 窗口、Go↔JS 绑定、事件
-├── win32.go           # 置顶、关闭到托盘、窗口尺寸、浅色标题栏、图标、单实例
-├── tray.go            # 托盘图标与菜单
-├── web/               # 内嵌 HTML/CSS/JS（无外部依赖）
-├── assets/            # 图标与 manifest
-├── install.ps1/.cmd   # 安装
-├── uninstall.ps1/.cmd # 卸载
-└── build.ps1          # 构建
-```
-
-## 已知限制
-
-- 目前只支持 Windows（WebView2）。
-- DSH 必须是本机正在运行的进程；远程 DSH 不在这一版范围内。
-- 会话列表接口没有过滤参数，应用会一次性拉取会话并只保留最近 60 个用于选择。
-- 如果 DSH 的本地 API 或凭据格式在未来版本变化，需要同步调整 `dsh.go`。
-- 筛选和状态计数按**顶层任务**计算；子任务状态通过父任务的 `1/4` 进度体现，不会单独出现在「完成」筛选里。
-- 接入说明和 `AGENTS.local.md` 是让模型理解清单接口的约定；不同模型的执行稳定性会有差异。模型仍可能误判“感慨”和“任务”的边界，建议在接入后的前几次使用时观察。
-- 长期数据目前使用单个 JSON 文件（带原子写入）；如果未来达到数万条输入，再迁移到 SQLite 会更合适。
-- 托盘图标位于 Windows 通知区域，可能被系统折叠到“^”里，可在任务栏设置中固定。
+If TodoList Agent is useful to you, a star helps. Bug reports and focused pull requests are welcome.
