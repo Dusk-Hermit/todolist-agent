@@ -8,7 +8,9 @@ TodoList Agent is a small desktop application built with **Go + WebView2**. It c
 
 The important part is not that it is another todo app. It is a place where you can think out loud: fragments, complaints, links, half-finished plans, and the occasional “I should really do this”. DSH only turns **explicit action intentions** into tasks. The original words stay in a searchable journal, together with the tasks they produced.
 
-![TodoList Agent main window](docs/main.png)
+<p align="center">
+  <img src="docs/main.png" width="72%" alt="TodoList Agent main window" />
+</p>
 
 ## Why this exists
 

@@ -8,7 +8,9 @@ TodoList Agent 是一个用 **Go + WebView2** 编写的桌面应用。它连接�
 
 它的重点不是“再做一个待办 App”，而是把“想法刚出现、还没想清楚”的那一步放进桌面：零散的句子、感慨、链接、半成形的计划，都可以先写下来。DSH 只把**明确的行动意图**提炼成任务；原始文字会进入可搜索的想法回顾，并和它产生的任务保持关联。
 
-![TodoList Agent 主界面](docs/main.png)
+<p align="center">
+  <img src="docs/main.png" width="72%" alt="TodoList Agent 主界面" />
+</p>
 
 ## 为什么做这个
 
