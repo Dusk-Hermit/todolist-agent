@@ -30,11 +30,11 @@ func TestQueuedResultUsesCompletedSessionEvents(t *testing.T) {
 	c.baseURL, c.secret = mock.URL, []byte("test signing key")
 	row := sessionRow{SessionID: "test"}
 	row.Projections.AsOfSeq = 17
-	for id, want := range map[string]bool{"first": true, "second": false, "missing": false} {
+	for id, want := range map[string]string{"first": "sent", "second": "failed", "missing": ""} {
 		p := &activePrompt{queuedPrompt: queuedPrompt{ID: id}, Session: "test", PreviousSeq: 10}
-		response, ok := c.queuedResult(t.Context(), p, &row)
-		if ok != want || (ok && response != "完成") {
-			t.Fatalf("prompt %s got %q, %t", id, response, ok)
+		outcome := c.queuedResult(t.Context(), p, &row)
+		if outcome.status != want || (want == "sent" && outcome.response != "完成") {
+			t.Fatalf("prompt %s got %+v", id, outcome)
 		}
 	}
 	if hits.Load() != 1 {

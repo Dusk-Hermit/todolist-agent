@@ -2,7 +2,7 @@ package main
 
 const (
 	appName    = "TodoList Agent"
-	appVersion = "0.4.5"
+	appVersion = "0.4.6"
 	appID      = "Dusk.TodoListAgent"
 
 	statusTodo    = "todo"
@@ -59,7 +59,7 @@ type HistoryEvent struct {
 type ChatMessage struct {
 	ID        string `json:"id"`
 	Text      string `json:"text"`
-	Status    string `json:"status"`         // sending | sent | queued | failed | uncertain
+	Status    string `json:"status"`         // sending | accepted | sent | queued | failed | uncertain
 	Kind      string `json:"kind,omitempty"` // input | onboarding
 	Error     string `json:"error,omitempty"`
 	SessionID string `json:"sessionId,omitempty"`
@@ -163,6 +163,7 @@ type JournalEntry struct {
 	ID        string        `json:"id"`
 	Text      string        `json:"text"`
 	Status    string        `json:"status"`
+	Error     string        `json:"error,omitempty"`
 	SessionID string        `json:"sessionId,omitempty"`
 	At        int64         `json:"at"`
 	Tasks     []JournalTask `json:"tasks"`
@@ -180,6 +181,8 @@ type StatePayload struct {
 	Events       []HistoryEvent  `json:"events"`
 	Messages     []ChatMessage   `json:"messages"`
 	MessageTotal int             `json:"messageTotal"`
+	PromptStage  string          `json:"promptStage,omitempty"`
+	Uncertain    int             `json:"uncertainPrompts"`
 	Prefs        Prefs           `json:"prefs"`
 	FocusID      string          `json:"focusId,omitempty"`
 	DSH          DSHStatus       `json:"dsh"`

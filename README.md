@@ -137,6 +137,10 @@ Paired devices use encrypted connections and exchange changed records. Edits to 
 
 Android saves messages offline and shows the pending queue in Settings. After reconnecting, the PC waits about five seconds to collect the backlog and sorts the messages it has received by their creation times. It sends one at a time to DSH. New inputs join the pending queue during processing. Devices can still edit local tasks, and they exchange the batch results once DSH finishes.
 
+To send text from another Android app, choose **TodoList Agent** in the system share sheet or in the text selection menu, then confirm **加入待发队列**. Shared text uses the same queue as messages typed into TodoList Agent.
+
+When a DSH acknowledgement or execution result is missing, the desktop app checks the original session on reconnect. Use **重新核对** to check again, or **刷新同步** on Android to pull the latest status. The journal shows the reason when a message needs review or DSH reports an interruption. Messages with an ambiguous result are kept for review to avoid repeating any actions they may already have performed.
+
 For multi-PC routing, upgrade Android and every DSH computer to 0.4.0 or later. A prompt awaiting acknowledgement stays assigned to its original computer so that a connection failure cannot replay it on another computer. Each DSH session keeps its own context. Use comma-separated IPv4 addresses when multicast discovery is unavailable.
 
 ### Using LAN sync safely

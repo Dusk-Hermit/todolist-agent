@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -86,7 +87,8 @@ type DSHClient struct {
 	wake   chan struct{}
 	cancel context.CancelFunc
 
-	queueHistory dshQueueHistory // accessed only by the DSH polling loop
+	queueHistory   map[string]*dshQueueHistory // accessed only by the DSH polling loop
+	recheckHistory atomic.Bool
 }
 
 func newDSHClient(a *App) *DSHClient {
@@ -322,7 +324,7 @@ func (c *DSHClient) reportError(err error) {
 	if c.app.setStatus(st) {
 		c.app.emitStatus()
 	}
-	c.expireActivePrompt()
+	c.expireActivePrompt("正在等待 DSH 重连")
 }
 
 func (c *DSHClient) connect(ctx context.Context) error {

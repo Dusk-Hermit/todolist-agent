@@ -23,34 +23,45 @@ type dshHistoryPage struct {
 // Cache the read-only history for the current projection sequence so that
 // multiple pending prompts do not each fetch the same session events.
 type dshQueueHistory struct {
-	session  string
-	sequence int
-	before   int
-	pages    int
-	more     bool
-	failedAt time.Time
-	records  []dshHistoryRecord
+	session     string
+	sequence    int
+	before      int
+	pages       int
+	more        bool
+	unsupported bool
+	failedAt    time.Time
+	records     []dshHistoryRecord
 }
 
-func (c *DSHClient) queuedResult(ctx context.Context, prompt *activePrompt, row *sessionRow) (string, bool) {
-	if response, ok := queuedPromptResult(prompt, row); ok {
-		return response, true
-	}
-	if row == nil || row.Running || row.Projections.AsOfSeq <= prompt.PreviousSeq {
-		return "", false
+type promptOutcome struct {
+	status   string
+	detail   string
+	response string
+}
+
+func (c *DSHClient) queuedResult(ctx context.Context, prompt *activePrompt, row *sessionRow) promptOutcome {
+	if row == nil || row.Projections.AsOfSeq <= prompt.PreviousSeq {
+		return queuedProjectionResult(prompt, row)
 	}
 
-	h := &c.queueHistory
-	if h.session != row.SessionID || h.sequence != row.Projections.AsOfSeq {
-		*h = dshQueueHistory{session: row.SessionID, sequence: row.Projections.AsOfSeq, more: true}
+	if c.queueHistory == nil {
+		c.queueHistory = make(map[string]*dshQueueHistory)
 	}
-	for {
-		if response, ok := completedPromptInHistory(prompt, h.records); ok {
-			return response, true
+	h := c.queueHistory[row.SessionID]
+	if h == nil || (h.sequence != row.Projections.AsOfSeq && (!h.more || h.pages >= 32 || h.before <= prompt.PreviousSeq)) {
+		h = &dshQueueHistory{session: row.SessionID, sequence: row.Projections.AsOfSeq, more: true}
+		c.queueHistory[row.SessionID] = h
+	}
+	for fetched := 0; ; fetched++ {
+		if outcome := promptResultInHistory(prompt, h.records); outcome.status != "" {
+			return outcome
 		}
-		if !h.more || h.pages >= 4 || (h.before > 0 && h.before <= prompt.PreviousSeq+1) ||
+		if h.unsupported {
+			return queuedProjectionResult(prompt, row)
+		}
+		if fetched >= 2 || !h.more || h.pages >= 32 || (h.before > 0 && h.before <= prompt.PreviousSeq) ||
 			time.Since(h.failedAt) < 10*time.Second {
-			return "", false
+			return promptOutcome{}
 		}
 		request := map[string]any{
 			"address":     map[string]string{"kind": "session", "sessionId": h.session},
@@ -63,19 +74,24 @@ func (c *DSHClient) queuedResult(ctx context.Context, prompt *activePrompt, row 
 		pageCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		raw, err := c.call(pageCtx, "session/events", map[string]any{"request": request})
 		cancel()
+		if err != nil && (strings.HasPrefix(err.Error(), "DSH 返回 HTTP 404:") ||
+			strings.HasPrefix(err.Error(), "METHOD_NOT_FOUND:")) {
+			h.unsupported = true
+			return queuedProjectionResult(prompt, row)
+		}
 		var page dshHistoryPage
 		if err != nil || json.Unmarshal(raw, &page) != nil {
 			h.failedAt = time.Now()
-			return "", false
+			return promptOutcome{}
 		}
 		if len(page.Records) == 0 {
 			h.more = false
-			return "", false
+			return promptOutcome{}
 		}
 		oldest := page.Records[0].Event.Seq
 		if oldest <= 0 || (h.before > 0 && oldest >= h.before) {
 			h.more = false
-			return "", false
+			return promptOutcome{}
 		}
 		h.before, h.more = oldest, page.HasMore
 		h.pages++
@@ -88,7 +104,7 @@ type dshHistoryContent struct {
 	Text string `json:"text"`
 }
 
-func completedPromptInHistory(prompt *activePrompt, records []dshHistoryRecord) (string, bool) {
+func promptResultInHistory(prompt *activePrompt, records []dshHistoryRecord) promptOutcome {
 	marker := "<!-- todo-msg:" + prompt.ID + " -->"
 	turn, matched := 0, false
 	response := ""
@@ -138,12 +154,21 @@ func completedPromptInHistory(prompt *activePrompt, records []dshHistoryRecord) 
 			}
 		case "turn/end":
 			if data.Turn == turn {
-				if matched && data.Reason.Kind == "completed" {
-					return response, true
+				if matched {
+					switch data.Reason.Kind {
+					case "completed":
+						return promptOutcome{status: "sent", response: response}
+					case "aborted", "cancelled", "canceled":
+						return promptOutcome{status: "failed", detail: "DSH 已取消执行，可能已完成部分操作"}
+					case "interrupted":
+						return promptOutcome{status: "failed", detail: "DSH 执行中断，可能已完成部分操作"}
+					case "error", "blocked", "max-tokens":
+						return promptOutcome{status: "failed", detail: "DSH 未正常完成执行，请查看原会话"}
+					}
 				}
 				turn, matched, response = 0, false, ""
 			}
 		}
 	}
-	return "", false
+	return promptOutcome{}
 }

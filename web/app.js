@@ -205,6 +205,16 @@
     if (S.panelOpen && S.panelTab === "history") renderHistory();
     if (S.panelOpen && S.panelTab === "journal" && !S.journalLoading && totalChanged) {
       loadJournal(true);
+    } else if (S.panelOpen && S.panelTab === "journal") {
+      const messages = new Map(s.messages.map((m) => [m.id, m]));
+      for (const entry of S.journalEntries) {
+        const message = messages.get(entry.id);
+        if (message) {
+          entry.status = message.status;
+          entry.error = message.error;
+        }
+      }
+      renderJournal();
     }
     updateRunningTimer();
   }
@@ -216,6 +226,7 @@
     renderStatus();
     renderSessionChip();
     renderRunning();
+    renderSendState();
     updateSetupBanner();
     if (S.settingsOpen) updateSettings(false);
     if (!wasRunning && st.running) {
@@ -916,10 +927,13 @@
       const tasks = (e.tasks || []).map((t) =>
         `<button class="journal-task ${esc(t.status)}" data-task-id="${esc(t.id)}">${esc(t.title)}</button>`
       ).join("");
-      const status = e.status && e.status !== "sent" ? `<span>· ${esc(e.status)}</span>` : "";
+      const label = {queued: "等待发送", sending: "等待 DSH 接收确认", accepted: "DSH 已接收",
+        uncertain: "执行状态待核对", failed: "未正常完成"}[e.status];
+      const status = label ? `<span>· ${label}</span>` : "";
       return `<article class="journal-item" data-message-id="${esc(e.id)}">
         <div class="journal-head"><time>${esc(journalDate(e.at))}</time>${status}</div>
         <div class="journal-text">${esc(e.text)}</div>
+        ${e.error ? `<div class="journal-head">${esc(e.error)}</div>` : ""}
         ${tasks ? `<div class="journal-tasks">${tasks}</div>` : ""}
       </article>`;
     }).join("");
@@ -1446,9 +1460,29 @@
   function renderSendState() {
     const el = $("sendState");
     if (!el) return;
+    const data = S.data || {};
+    const dsh = data.dsh || {};
+    const recheck = $("recheckPrompts");
+    recheck.classList.toggle("hidden", !data.uncertainPrompts);
+    recheck.textContent = isMobile() ? "刷新同步" : "重新核对";
+    el.title = "";
+    el.className = "send-state";
+    if (data.promptStage) {
+      if (!dsh.connected) {
+        el.textContent = "等待 DSH 重连 · 核对原消息";
+      } else if (data.promptStage === "accepted") {
+        el.textContent = "DSH 已接收 · 等待执行结果";
+      } else {
+        el.textContent = "等待 DSH 接收确认";
+      }
+      return;
+    }
     const pending = S.lan && S.lan.pending;
     if (pending && pending.length) {
-      el.textContent = `${pending.length} 条待发消息`;
+      const assigned = isMobile() ? pending.filter((p) => p.host).length : 0;
+      el.textContent = assigned === pending.length
+        ? `${assigned} 条等待原电脑确认`
+        : `${pending.length} 条等待发送`;
       el.className = "send-state";
       return;
     }
@@ -1457,25 +1491,33 @@
       el.className = "send-state";
       return;
     }
-    const msgs = (S.data && S.data.messages) || [];
+    const msgs = data.messages || [];
     const last = msgs[msgs.length - 1];
+    if (data.uncertainPrompts) {
+      el.textContent = `${data.uncertainPrompts} 条执行状态待核对`;
+      el.className = "send-state err";
+      el.title = last && last.status === "uncertain" ? (last.error || "") : "请在想法回顾查看各条消息";
+      return;
+    }
     if (!last) {
       el.textContent = "";
       el.className = "send-state";
       return;
     }
     if (last.status === "sending") {
-      el.textContent = "正在发送…";
+      el.textContent = "等待 DSH 接收确认";
       el.className = "send-state";
+    } else if (last.status === "accepted") {
+      el.textContent = "DSH 已接收 · 等待执行结果";
     } else if (last.status === "queued") {
       el.textContent = "已加入 DSH 队列";
       el.className = "send-state";
     } else if (last.status === "uncertain" || last.status === "failed") {
-      el.textContent = last.status === "uncertain" ? "执行状态待核对" : "上次发送失败";
+      el.textContent = last.status === "uncertain" ? "执行状态待核对" : "上条消息未正常完成";
       el.className = "send-state err";
       el.title = last.error || "";
     } else if (Date.now() - (last.at || 0) < 120000) {
-      el.textContent = "已发送 · DSH 已接收";
+      el.textContent = "DSH 已完成";
       el.className = "send-state ok";
     } else {
       el.textContent = "";
@@ -1547,6 +1589,14 @@
       }
     });
     $("lanRefresh").addEventListener("click", refreshLAN);
+    $("recheckPrompts").addEventListener("click", () => {
+      if (isMobile()) {
+        refreshLAN();
+      } else {
+        call("todo_recheckPrompts").then(() => showToast("info", "正在核对原 DSH 会话"))
+          .catch((error) => showToast("error", errText(error)));
+      }
+    });
     $("lanSave").addEventListener("click", () => configureLAN($("lanCode").value, $("lanAddress").value));
     $("lanGenerate").addEventListener("click", () => configureLAN("generate", $("lanAddress").value));
     $("lanDisable").addEventListener("click", () => configureLAN("", ""));

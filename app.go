@@ -106,12 +106,16 @@ func (a *App) snapshot() StatePayload {
 	}
 	messages := make([]ChatMessage, 0, 50)
 	messageTotal := 0
+	uncertain := 0
 	for i := len(a.state.Messages) - 1; i >= 0; i-- {
 		m := a.state.Messages[i]
 		if m.Kind == "onboarding" {
 			continue
 		}
 		messageTotal++
+		if m.Status == "uncertain" {
+			uncertain++
+		}
 		if len(messages) < 50 {
 			messages = append(messages, m)
 		}
@@ -131,12 +135,21 @@ func (a *App) snapshot() StatePayload {
 		bridge.URL = a.bridge.URL()
 		bridge.ConfigPath = a.bridge.ConfigPath()
 	}
+	promptStage := ""
+	if prompt := a.state.ActivePrompt; prompt != nil {
+		promptStage = "sending"
+		if prompt.Accepted {
+			promptStage = "accepted"
+		}
+	}
 	return StatePayload{
 		Version:      appVersion,
 		Todos:        todos,
 		Events:       events,
 		Messages:     messages,
 		MessageTotal: messageTotal,
+		PromptStage:  promptStage,
+		Uncertain:    uncertain,
 		Prefs:        prefs,
 		FocusID:      a.state.FocusID,
 		DSH:          a.status,
@@ -1001,7 +1014,7 @@ func (a *App) journalPage(beforeAt int64, limit int, query string) JournalPage {
 			tasks = []JournalTask{}
 		}
 		items = append(items, JournalEntry{
-			ID: m.ID, Text: m.Text, Status: m.Status, SessionID: m.SessionID, At: m.At, Tasks: tasks,
+			ID: m.ID, Text: m.Text, Status: m.Status, Error: m.Error, SessionID: m.SessionID, At: m.At, Tasks: tasks,
 		})
 	}
 	return JournalPage{Items: items, HasMore: hasMore, Total: total}

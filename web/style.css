@@ -1431,6 +1431,18 @@ svg {
   border-color: var(--line);
 }
 
+.composer-send-status {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.composer-send-status .session-chip {
+  max-width: none;
+}
+
 .send-state {
   color: var(--faint);
   font-size: 9.5px;

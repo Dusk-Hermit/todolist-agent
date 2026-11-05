@@ -1,7 +1,9 @@
 package dev.todolist.agent;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.PendingIntent;
+import android.content.ClipData;
 import android.content.Intent;
 import android.content.pm.PackageInstaller;
 import android.content.pm.PackageInfo;
@@ -18,6 +20,11 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.Toast;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.nio.charset.StandardCharsets;
 import java.io.File;
@@ -47,6 +54,8 @@ public final class MainActivity extends Activity {
     private boolean loaded;
     private File pendingUpdate;
     private boolean waitingForInstallPermission;
+    private AlertDialog shareDialog;
+    private String sharedText;
 
     private final Runnable poll = new Runnable() {
         @Override public void run() {
@@ -97,6 +106,102 @@ public final class MainActivity extends Activity {
                 if (web != null) web.loadDataWithBaseURL(APP_ORIGIN, html, "text/html", "UTF-8", null);
             });
         });
+        if (saved == null) {
+            receiveTextShare(getIntent());
+        } else {
+            confirmTextShare(saved.getString("sharedText"));
+        }
+    }
+
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        receiveTextShare(intent);
+    }
+
+    @Override protected void onSaveInstanceState(Bundle state) {
+        super.onSaveInstanceState(state);
+        state.putString("sharedText", sharedText);
+    }
+
+    private void receiveTextShare(Intent intent) {
+        if (intent == null || !"text/plain".equalsIgnoreCase(intent.getType())) return;
+        try {
+            CharSequence text;
+            if (Intent.ACTION_PROCESS_TEXT.equals(intent.getAction())) {
+                text = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT);
+            } else if (Intent.ACTION_SEND.equals(intent.getAction())) {
+                text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT);
+                ClipData clip = intent.getClipData();
+                if (text == null && clip != null && clip.getItemCount() == 1) {
+                    text = clip.getItemAt(0).getText();
+                }
+            } else {
+                return;
+            }
+            if (text == null || text.toString().trim().isEmpty()) {
+                showShareToast("没有可发送的文字");
+            } else if (text.length() > 64000) {
+                showShareToast("分享的文字过长，请分段发送");
+            } else {
+                confirmTextShare(text.toString());
+            }
+        } catch (RuntimeException e) {
+            showShareToast("无法读取分享的文字");
+        }
+    }
+
+    private void confirmTextShare(String text) {
+        if (text == null) return;
+        if (shareDialog != null) shareDialog.dismiss();
+        sharedText = text;
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("发送到 TodoList Agent")
+                .setMessage(text)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("加入待发队列", null)
+                .create();
+        shareDialog = dialog;
+        dialog.setOnDismissListener(ignored -> {
+            if (shareDialog == dialog) {
+                shareDialog = null;
+                sharedText = null;
+            }
+        });
+        dialog.show();
+        android.widget.Button submit = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+        submit.setFilterTouchesWhenObscured(true);
+        submit.setOnClickListener(ignored -> {
+            submit.setEnabled(false);
+            enqueueSharedText(text, dialog);
+        });
+    }
+
+    private void enqueueSharedText(String text, AlertDialog dialog) {
+        WORK.execute(() -> {
+            String args = new JSONArray().put(text).toString();
+            String reply = fromBytes(nativeInvoke(bytes("todo_sendInput"), bytes(args)));
+            String error;
+            try {
+                error = new JSONObject(reply).optString("error");
+            } catch (JSONException e) {
+                error = "无法确认文字已保存";
+            }
+            String result = error;
+            ui.post(() -> {
+                if (isDestroyed()) return;
+                if (result.isEmpty()) {
+                    dialog.dismiss();
+                    showShareToast("已加入待发队列");
+                } else {
+                    if (dialog.isShowing()) dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);
+                    showShareToast("无法加入队列：" + result);
+                }
+            });
+        });
+    }
+
+    private void showShareToast(String text) {
+        if (!isDestroyed()) Toast.makeText(this, text, Toast.LENGTH_SHORT).show();
     }
 
     @Override public void onStart() {
@@ -199,6 +304,7 @@ public final class MainActivity extends Activity {
     }
 
     @Override public void onDestroy() {
+        if (shareDialog != null) shareDialog.dismiss();
         if (web != null) {
             web.removeJavascriptInterface("TodoNative");
             web.destroy();

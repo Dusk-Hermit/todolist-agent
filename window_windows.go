@@ -63,6 +63,7 @@ func createMainWindow(a *App) webview2.WebView {
 		"todo_windowAction":    a.bindingWindowAction,
 		"todo_connectDSH":      a.bindingConnectDSH,
 		"todo_refreshSessions": a.bindingRefreshSessions,
+		"todo_recheckPrompts":  a.bindingRecheckPrompts,
 		"todo_selectSession":   a.bindingSelectSession,
 		"todo_newSession":      a.bindingNewSession,
 		"todo_sendOnboarding":  a.bindingSendOnboarding,
@@ -233,6 +234,13 @@ func (a *App) bindingRefreshSessions() []SessionOption {
 		a.dsh.Wake()
 	}
 	return a.getSessions()
+}
+
+func (a *App) bindingRecheckPrompts() {
+	if a.dsh != nil {
+		a.dsh.recheckHistory.Store(true)
+		a.dsh.Wake()
+	}
 }
 
 func (a *App) bindingSelectSession(id string) map[string]any {

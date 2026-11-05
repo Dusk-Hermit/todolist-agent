@@ -53,7 +53,15 @@ func (a *App) load() error {
 		return err
 	}
 	normalizeState(&st)
+	repaired := restorePromptCompletions(&st)
+	if platformName == "windows" && recoverPromptTracking(&st) {
+		repaired = true
+	}
 	a.state = st
+	if repaired {
+		a.dirty = true
+		a.saveNow()
+	}
 	return nil
 }
 

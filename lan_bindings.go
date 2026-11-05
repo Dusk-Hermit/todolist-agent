@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"slices"
 	"strings"
+	"time"
 )
 
 type lanConfig struct {
@@ -270,6 +271,8 @@ func (a *App) mergeReplica(other replica) error {
 	}
 	err := next.Replica.applyTo(&next)
 	if err == nil {
+		next.UncertainPrompts = maps.Clone(next.UncertainPrompts)
+		restorePromptCompletions(&next)
 		if a.dsh == nil && len(next.Queue) != 0 {
 			next.Queue = maps.Clone(next.Queue)
 			for _, m := range next.Messages {
@@ -290,6 +293,9 @@ func (a *App) mergeReplica(other replica) error {
 // The caller holds a.mu. Update the in-memory state only after the same
 // snapshot is safely on disk.
 func (a *App) persistLocked(next persistedState) error {
+	if next.Replica.Device != "" {
+		next.Replica.capture(replicaValues(next), time.Now().UnixMilli())
+	}
 	payload, err := json.MarshalIndent(next, "", "  ")
 	if err == nil {
 		err = atomicWrite(a.dataPath, payload)

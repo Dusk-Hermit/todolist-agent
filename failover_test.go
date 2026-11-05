@@ -132,11 +132,11 @@ func TestInterruptedBatchResumesSyncAndReconcilesOnlyExactPrompt(t *testing.T) {
 		Prompt   string `json:"prompt"`
 		Response string `json:"response"`
 	}
-	turn.Seq, turn.Prompt, turn.Response = 2, "another request", "other result"
+	turn.Seq, turn.Prompt, turn.Response = 2, "request", "other result"
 	row.Projections.Values.TurnOutline = append(row.Projections.Values.TurnOutline, turn)
 	a.dsh.reconcileUncertain(t.Context(), []sessionRow{row})
 	if a.state.Messages[0].Status != "uncertain" {
-		t.Fatal("matched unrelated DSH response")
+		t.Fatal("matched an unrelated DSH response with identical user text")
 	}
 	row.Projections.Values.TurnOutline[0].Prompt = "request\n\n<!-- todo-msg:" + id + " -->"
 	a.dsh.reconcileUncertain(t.Context(), []sessionRow{row})
