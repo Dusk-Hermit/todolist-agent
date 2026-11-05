@@ -130,11 +130,17 @@ From then on:
 1. Install version 0.3.0 or later on Windows and install `TodoListAgent-android.apk` on each Android device. [GitHub Releases](https://github.com/Dusk-Hermit/todolist-agent/releases)
 2. Connect the devices to the same LAN. In **Settings → LAN sync**, generate a pairing code on Windows and paste it into each Android app.
 3. Paired devices discover each other and sync while the apps are running. The refresh button scans on demand and reports the result. If multicast is unavailable, enter the PC's LAN IPv4 address on Android. If Windows Firewall asks, allow the app on private networks. Discovery and sync use UDP and TCP port 17891.
-4. Android automatically picks an available DSH computer. You can also choose one from the list. Set the DSH address and port in the Windows app.
+4. Set up a DSH session on each Windows computer. Android can remember a preferred computer. If it or its DSH becomes unavailable, Android syncs with another ready computer before sending fresh prompts there. When the preferred computer returns, it receives the synchronized tasks, messages, and reply history.
 
 Paired devices use encrypted connections and exchange changed records. Edits to separate tasks merge. If devices concurrently change the same record, the newer list replaces the older list. Deletion markers keep stale devices from restoring deleted tasks. Discovery follows the IPv4 multicast announcement and reply pattern used by [LocalSend](https://github.com/localsend/localsend).
 
 Android saves messages offline and shows the pending queue in Settings. After reconnecting, the PC waits about five seconds to collect the backlog and sorts the messages it has received by their creation times. It sends one at a time to DSH. New inputs join the pending queue during processing. Devices can still edit local tasks, and they exchange the batch results once DSH finishes.
+
+For multi-PC routing, upgrade Android and every DSH computer to 0.4.0 or later. A prompt awaiting acknowledgement stays assigned to its original computer so that a connection failure cannot replay it on another computer. Each DSH session keeps its own context. Use comma-separated IPv4 addresses when multicast discovery is unavailable.
+
+## Updates
+
+Both apps check GitHub Releases at startup. **Settings → About** also offers a manual check and one-click update. The updater verifies the downloaded package. Windows restarts the app after setup. Android offers optional automatic downloading and installation, subject to the system's permission and confirmation prompts. Install 0.4.0 manually when upgrading from earlier versions.
 
 ## Daily use
 
