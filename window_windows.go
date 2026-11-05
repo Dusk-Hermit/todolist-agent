@@ -134,9 +134,6 @@ func (a *App) setAlwaysOnTop(on bool) {
 		applyTopMost(a.hwnd, on)
 	}
 	a.markDirty()
-	if a.tray != nil {
-		a.tray.setPin(on)
-	}
 	a.emitState()
 }
 
@@ -160,12 +157,13 @@ func (a *App) quitApp() {
 	if a.web != nil {
 		w := a.web
 		w.Dispatch(func() {
+			if a.tray != nil {
+				a.tray.close()
+				a.tray = nil
+			}
 			a.restoreWindowProc()
 			w.Destroy()
 		})
-	}
-	if a.tray != nil {
-		a.tray.quit()
 	}
 }
 
@@ -194,9 +192,6 @@ func (a *App) bindingSavePrefs(p Prefs) map[string]any {
 		on := a.state.Prefs.AlwaysOnTop
 		a.mu.Unlock()
 		applyTopMost(a.hwnd, on)
-		if a.tray != nil {
-			a.tray.setPin(on)
-		}
 	}
 	a.emitState()
 	return map[string]any{"ok": true}

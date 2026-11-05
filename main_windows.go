@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 
 	"golang.org/x/sys/windows"
@@ -14,6 +15,10 @@ import (
 var instanceMutex windows.Handle
 
 func main() {
+	// The WebView2 window and notification icon share this thread's message loop.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	var hidden bool
 	flag.BoolVar(&hidden, "hidden", false, "start minimized to the notification area")
 	flag.Parse()

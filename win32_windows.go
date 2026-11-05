@@ -336,6 +336,21 @@ func clampWindowRect(hwnd uintptr, r WindowRect) WindowRect {
 }
 
 func (a *App) windowProc(hwnd, msg, wp, lp uintptr) uintptr {
+	if t := a.tray; t != nil {
+		switch {
+		case t.taskbarCreated != 0 && msg == t.taskbarCreated:
+			t.add()
+			return 0
+		case msg == wmTrayIcon && wp == uintptr(t.data.ID):
+			switch lp {
+			case wmLeftDoubleClick:
+				a.showMainWindow()
+			case wmRightButtonUp:
+				a.trayMenu()
+			}
+			return 0
+		}
+	}
 	switch msg {
 	case wmClose:
 		a.mu.Lock()
