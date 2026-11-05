@@ -35,6 +35,7 @@ type lanInfo struct {
 	Platform string    `json:"platform"`
 	DSH      DSHStatus `json:"dsh"`
 	Paused   bool      `json:"paused"`
+	Dispatch bool      `json:"dispatch"`
 }
 
 type lanPeer struct {
@@ -45,6 +46,7 @@ type lanPeer struct {
 	DSHAddress string    `json:"dshAddress,omitempty"`
 	DSH        DSHStatus `json:"-"`
 	Paused     bool      `json:"paused"`
+	Dispatch   bool      `json:"dispatch"`
 }
 
 type lanService struct {
@@ -57,6 +59,7 @@ type lanService struct {
 	client                  *http.Client
 
 	refreshMu  sync.Mutex
+	syncedHost string // only accessed while refreshMu is held
 	mu         sync.Mutex
 	peers      []lanPeer
 	discovered map[string]lanSighting
@@ -130,6 +133,7 @@ func newLAN(a *App, cfg lanConfig, id string, port int) (*lanService, error) {
 	mux.HandleFunc("POST "+lanPrefix+"/sync", s.handleSync)
 	mux.HandleFunc("POST "+lanPrefix+"/apply", s.handleApply)
 	mux.HandleFunc("POST "+lanPrefix+"/enqueue", s.handleEnqueue)
+	mux.HandleFunc("POST "+lanPrefix+"/dispatch", s.handleDispatch)
 	s.server = &http.Server{ReadTimeout: 10 * time.Second, WriteTimeout: 12 * time.Second, IdleTimeout: 30 * time.Second,
 		MaxHeaderBytes: 8 << 10, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !hmac.Equal([]byte(r.Header.Get("Authorization")), []byte("Bearer "+s.code)) {
@@ -181,6 +185,10 @@ func (s *lanService) signal() {
 }
 
 func (s *lanService) request(method, address, route string, data, out any) error {
+	return s.requestContext(s.ctx, method, address, route, data, out)
+}
+
+func (s *lanService) requestContext(ctx context.Context, method, address, route string, data, out any) error {
 	var body io.Reader
 	if data != nil {
 		payload, err := json.Marshal(data)
@@ -189,7 +197,7 @@ func (s *lanService) request(method, address, route string, data, out any) error
 		}
 		body = bytes.NewReader(payload)
 	}
-	r, err := http.NewRequestWithContext(s.ctx, method, "https://"+address+lanPrefix+route, body)
+	r, err := http.NewRequestWithContext(ctx, method, "https://"+address+lanPrefix+route, body)
 	if err != nil {
 		return err
 	}
@@ -223,7 +231,8 @@ func (s *lanService) handleInfo(w http.ResponseWriter, _ *http.Request) {
 	s.app.mu.Lock()
 	paused := s.app.batchPausedLocked()
 	s.app.mu.Unlock()
-	writeJSON(w, http.StatusOK, lanInfo{ID: s.id, Name: s.name, Platform: platformName, DSH: status, Paused: paused})
+	writeJSON(w, http.StatusOK, lanInfo{ID: s.id, Name: s.name, Platform: platformName, DSH: status,
+		Paused: paused, Dispatch: s.app.dsh != nil})
 }
 
 func readLAN(w http.ResponseWriter, r *http.Request, dst any) bool {
@@ -290,16 +299,41 @@ func (s *lanService) handleEnqueue(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-func (s *lanService) uploadQueue(peer *lanPeer) error {
-	if peer == nil || !peer.DSH.Connected || peer.DSH.SessionID == "" {
-		return nil
+type promptDispatch struct {
+	Host    string         `json:"host"`
+	Prompts []queuedPrompt `json:"prompts"`
+}
+
+func (s *lanService) handleDispatch(w http.ResponseWriter, r *http.Request) {
+	var input promptDispatch
+	if !readLAN(w, r, &input) {
+		return
 	}
-	s.app.mu.Lock()
-	pending := orderedQueue(s.app.state.Queue)
-	s.app.mu.Unlock()
+	if s.app.dsh == nil || input.Host != s.id || len(input.Prompts) > 100 {
+		http.Error(w, "DSH 设备标识不匹配", http.StatusConflict)
+		return
+	}
+	for _, p := range input.Prompts {
+		if p.Host != s.id {
+			http.Error(w, "消息已指派给其他设备", http.StatusConflict)
+			return
+		}
+	}
+	if err := s.app.enqueuePrompts(input.Prompts); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *lanService) uploadQueue(peer lanPeer, assign bool) error {
+	pending, err := s.app.assignPrompts(peer.ID, assign)
+	if err != nil {
+		return err
+	}
 	for batch := range slices.Chunk(pending, 100) {
 		var result map[string]bool
-		if err := s.request("POST", peer.Address, "/enqueue", batch, &result); err != nil {
+		if err := s.request("POST", peer.Address, "/dispatch", promptDispatch{Host: peer.ID, Prompts: batch}, &result); err != nil {
 			return err
 		}
 		if !result["ok"] {
@@ -310,6 +344,43 @@ func (s *lanService) uploadQueue(peer *lanPeer) error {
 		}
 	}
 	return nil
+}
+
+func (s *lanService) probePeers(addresses map[string]bool) ([]lanPeer, error) {
+	addrs := slices.Sorted(maps.Keys(addresses))
+	type result struct {
+		info lanInfo
+		err  error
+	}
+	results := make([]result, len(addrs))
+	var workers sync.WaitGroup
+	for i, addr := range addrs {
+		workers.Go(func() {
+			ctx, cancel := context.WithTimeout(s.ctx, 1500*time.Millisecond)
+			defer cancel()
+			results[i].err = s.requestContext(ctx, "GET", addr, "/info", nil, &results[i].info)
+		})
+	}
+	workers.Wait()
+	peers := make([]lanPeer, 0, len(addrs))
+	seen := make(map[string]bool)
+	var probeErr error
+	for i, res := range results {
+		if res.err != nil {
+			probeErr = res.err
+			continue
+		}
+		info := res.info
+		if info.ID == "" || info.ID == s.id || seen[info.ID] {
+			continue
+		}
+		seen[info.ID] = true
+		addr := addrs[i]
+		peers = append(peers, lanPeer{ID: info.ID, Name: info.Name, Platform: info.Platform,
+			Address: addr, DSH: info.DSH, Paused: info.Paused, Dispatch: info.Dispatch,
+			DSHAddress: peerDSHAddress(addr, info.DSH.BaseURL)})
+	}
+	return peers, probeErr
 }
 
 func (s *lanService) exchange(peer lanPeer) error {
@@ -365,35 +436,25 @@ func (s *lanService) refresh(manual bool) (int, error) {
 		}
 	}
 	s.mu.Unlock()
-	if s.address != "" {
-		addresses[s.address] = true
-	}
-	peers := make([]lanPeer, 0)
-	seen := make(map[string]bool)
-	count := 0
-	var syncErr error
-	for _, addr := range slices.Sorted(maps.Keys(addresses)) {
-		var info lanInfo
-		if err := s.request("GET", addr, "/info", nil, &info); err != nil {
-			syncErr = err
-			continue
+	for address := range strings.SplitSeq(s.address, ",") {
+		if address != "" {
+			addresses[address] = true
 		}
-		if info.ID == "" || info.ID == s.id || seen[info.ID] {
-			continue
-		}
-		seen[info.ID] = true
-		p := lanPeer{ID: info.ID, Name: info.Name, Platform: info.Platform, Address: addr,
-			DSH: info.DSH, Paused: info.Paused, DSHAddress: peerDSHAddress(addr, info.DSH.BaseURL)}
-		peers = append(peers, p)
 	}
+	peers, syncErr := s.probePeers(addresses)
 	if platformName == "android" {
 		s.app.mu.Lock()
 		preferred := s.app.state.LAN.DSHDevice
 		s.app.mu.Unlock()
-		if err := s.uploadQueue(chooseDSH(peers, preferred)); err != nil {
-			syncErr = err
+		if active := chooseDSH(peers, preferred); active != nil {
+			// Pull from other peers first so the executing host sees the
+			// aggregate task state known to this phone before dispatch.
+			i := slices.IndexFunc(peers, func(p lanPeer) bool { return p.ID == active.ID })
+			peers[i], peers[len(peers)-1] = peers[len(peers)-1], peers[i]
 		}
 	}
+	count := 0
+	synced := make(map[string]bool, len(peers))
 	for _, peer := range peers {
 		if peer.Paused {
 			syncErr = errBatchRunning
@@ -403,6 +464,12 @@ func (s *lanService) refresh(manual bool) (int, error) {
 			syncErr = err
 		} else {
 			count++
+			synced[peer.ID] = true
+		}
+	}
+	if platformName == "android" {
+		if err := s.routeQueue(peers, synced); err != nil {
+			syncErr = err
 		}
 	}
 	if s.ctx.Err() == nil {
@@ -412,6 +479,29 @@ func (s *lanService) refresh(manual bool) (int, error) {
 		s.app.updateLANStatus(s)
 	}
 	return count, syncErr
+}
+
+func (s *lanService) routeQueue(peers []lanPeer, synced map[string]bool) error {
+	s.app.mu.Lock()
+	preferred := s.app.state.LAN.DSHDevice
+	s.app.mu.Unlock()
+	active := chooseDSH(peers, preferred)
+	if active == nil || active.ID != s.syncedHost {
+		s.syncedHost = ""
+	}
+	if active != nil && synced[active.ID] {
+		s.syncedHost = active.ID
+	}
+	var routeErr error
+	for _, peer := range peers {
+		if peer.canDispatch() {
+			assign := peer.ID == s.syncedHost && (synced[peer.ID] || peer.Paused)
+			if err := s.uploadQueue(peer, assign); err != nil {
+				routeErr = err
+			}
+		}
+	}
+	return routeErr
 }
 
 func peerDSHAddress(addr, base string) string {

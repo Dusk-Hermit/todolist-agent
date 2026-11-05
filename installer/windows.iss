@@ -43,11 +43,46 @@ Name: "{userdesktop}\TodoList Agent"; Filename: "{app}\TodoListAgent.exe"; Tasks
 
 [Run]
 Filename: "{app}\TodoListAgent.exe"; Description: "{cm:LaunchProgram,TodoList Agent}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\TodoListAgent.exe"; WorkingDir: "{app}"; Flags: nowait skipifnotsilent runasoriginaluser; Check: AutoLaunchRequested
 
 [Code]
 const
   WebViewKey = 'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
   LegacyKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\TodoListAgent';
+
+function AutoLaunchRequested: Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), '/AUTOLAUNCH') = 0 then
+      Result := True;
+end;
+
+function OpenProcess(Access: LongWord; Inherit: Boolean; PID: LongWord): THandle;
+  external 'OpenProcess@kernel32.dll stdcall';
+function WaitForSingleObject(Process: THandle; Timeout: LongWord): LongWord;
+  external 'WaitForSingleObject@kernel32.dll stdcall';
+function CloseHandle(Handle: THandle): Boolean;
+  external 'CloseHandle@kernel32.dll stdcall';
+
+function WaitForOldInstance: Boolean;
+var
+  PID: Integer;
+  Process: THandle;
+begin
+  Result := True;
+  PID := StrToIntDef(ExpandConstant('{param:OLDPID|0}'), 0);
+  if PID <= 0 then
+    Exit;
+  Process := OpenProcess($00100000, False, PID);
+  if Process <> 0 then
+  begin
+    Result := WaitForSingleObject(Process, 30000) = 0;
+    CloseHandle(Process);
+  end;
+end;
 
 function HasRuntimeAt(Root: Integer): Boolean;
 var
@@ -67,6 +102,11 @@ var
   ExitCode: Integer;
 begin
   Result := '';
+  if not WaitForOldInstance then
+  begin
+    Result := 'TodoList Agent is still running. Exit it and run Setup again.';
+    Exit;
+  end;
   if HasRuntime then
     Exit;
   ExtractTemporaryFile('MicrosoftEdgeWebview2Setup.exe');

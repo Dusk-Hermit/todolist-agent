@@ -70,6 +70,9 @@ func createMainWindow(a *App) webview2.WebView {
 		"todo_lanState":        a.bindingLANState,
 		"todo_lanConfigure":    a.bindingLANConfigure,
 		"todo_lanRefresh":      a.bindingLANRefresh,
+		"todo_updateState":     a.bindingUpdateState,
+		"todo_updateCheck":     a.bindingUpdateCheck,
+		"todo_updateInstall":   a.bindingUpdateInstall,
 	}
 	for name, fn := range bindings {
 		if err := w.Bind(name, fn); err != nil {

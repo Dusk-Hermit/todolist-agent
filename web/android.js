@@ -5,6 +5,7 @@
     "ready", "getState", "addTodo", "updateTodo", "setTodoStatus", "dropTodo",
     "deleteTodo", "moveTodo", "setFocus", "journal", "sendInput", "savePrefs",
     "lanState", "lanConfigure", "lanRefresh", "lanSelect",
+    "updateState", "updateCheck", "updateInstall", "updateAuto",
   ];
   let seq = 0;
   const pending = new Map();

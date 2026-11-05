@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 
 	webview2 "github.com/jchv/go-webview2"
 )
 
 const platformName = "windows"
+const updateAssetName = "TodoListAgent-Setup-win64.exe"
 
 type platformState struct {
 	startHidden bool
@@ -47,6 +50,24 @@ func (a *App) Start() error {
 	a.dsh = newDSHClient(a)
 	a.dsh.Start()
 	a.startSavedLAN()
+	a.startUpdateChecks()
+	return nil
+}
+
+func (a *App) installUpdate(path string) error {
+	a.saveNow()
+	setup := exec.Command(path, "/VERYSILENT", "/NORESTART", "/AUTOLAUNCH",
+		"/OLDPID="+strconv.Itoa(os.Getpid()))
+	if err := setup.Start(); err != nil {
+		return err
+	}
+	_ = setup.Process.Release()
+	a.mu.Lock()
+	w := a.web
+	a.mu.Unlock()
+	if w != nil {
+		w.Dispatch(a.quitApp)
+	}
 	return nil
 }
 

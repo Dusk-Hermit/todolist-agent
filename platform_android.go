@@ -17,10 +17,12 @@ import (
 )
 
 const platformName = "android"
+const updateAssetName = "TodoListAgent-android.apk"
 
 type platformState struct {
 	dispatchMu sync.Mutex
 	events     []string
+	updateAPK  string
 }
 
 //go:embed web/android.js
@@ -62,12 +64,41 @@ func TodoForeground(foreground C.int) {
 	}
 	if foreground != 0 {
 		phoneApp.startSavedLAN()
+		phoneApp.startUpdateChecks()
 	} else {
+		phoneApp.stopUpdateChecks()
 		phoneApp.stopLAN()
 		phoneApp.saveNow()
 		phoneApp.dispatchMu.Lock()
 		phoneApp.events = nil
 		phoneApp.dispatchMu.Unlock()
+	}
+}
+
+func (a *App) installUpdate(path string) error {
+	a.saveNow()
+	a.dispatchMu.Lock()
+	a.updateAPK = path
+	a.dispatchMu.Unlock()
+	return nil
+}
+
+//export TodoTakeUpdate
+func TodoTakeUpdate() *C.char {
+	if phoneApp == nil {
+		return C.CString("")
+	}
+	phoneApp.dispatchMu.Lock()
+	defer phoneApp.dispatchMu.Unlock()
+	path := phoneApp.updateAPK
+	phoneApp.updateAPK = ""
+	return C.CString(path)
+}
+
+//export TodoUpdateError
+func TodoUpdateError(message *C.char) {
+	if phoneApp != nil {
+		phoneApp.updateInstallResult(C.GoString(message))
 	}
 }
 
@@ -95,7 +126,10 @@ func TodoInvoke(method, data *C.char) *C.char {
 		"todo_sendInput": a.bindingSendInput,
 		"todo_lanState":  a.bindingLANState, "todo_lanConfigure": a.bindingLANConfigure,
 		"todo_lanRefresh": a.bindingLANRefresh, "todo_lanSelect": a.bindingLANSelect,
-		"todo_savePrefs": func(p Prefs) bool { a.setPrefs(p); a.emitState(); return true },
+		"todo_updateState": a.bindingUpdateState, "todo_updateCheck": a.bindingUpdateCheck,
+		"todo_updateInstall": a.bindingUpdateInstall,
+		"todo_updateAuto":    a.bindingUpdateAuto,
+		"todo_savePrefs":     func(p Prefs) bool { a.setPrefs(p); a.emitState(); return true },
 	}
 	value, err := invokeMobile(handlers[C.GoString(method)], []byte(C.GoString(data)))
 	out := map[string]any{"value": value}

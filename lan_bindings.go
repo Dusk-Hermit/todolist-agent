@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/netip"
 	"slices"
 	"strings"
@@ -25,18 +26,23 @@ type lanView struct {
 }
 
 func normalizeLANAddress(address string) (string, error) {
-	address = strings.TrimSpace(address)
-	if address == "" {
-		return "", nil
+	parts := strings.FieldsFunc(address, func(r rune) bool {
+		return r == ',' || r == '，' || r == ' ' || r == '\n' || r == '\r' || r == '\t'
+	})
+	if len(parts) > 16 {
+		return "", fmt.Errorf("最多可填写 16 个手动设备地址")
 	}
-	if ip, err := netip.ParseAddr(address); err == nil {
-		address = netip.AddrPortFrom(ip, lanPort).String()
+	for i, part := range parts {
+		if ip, err := netip.ParseAddr(part); err == nil {
+			part = netip.AddrPortFrom(ip, lanPort).String()
+		}
+		ap, err := netip.ParseAddrPort(part)
+		if err != nil || ap.Port() == 0 || !ap.Addr().Is4() || !isLANIP(ap.Addr()) {
+			return "", fmt.Errorf("请输入局域网 IPv4 地址，可附加端口")
+		}
+		parts[i] = ap.String()
 	}
-	ap, err := netip.ParseAddrPort(address)
-	if err != nil || ap.Port() == 0 || !ap.Addr().Is4() || !isLANIP(ap.Addr()) {
-		return "", fmt.Errorf("请输入局域网 IPv4 地址，可附加端口")
-	}
-	return ap.String(), nil
+	return strings.Join(parts, ","), nil
 }
 
 func (a *App) bindingLANConfigure(code, address string) (lanView, error) {
@@ -150,17 +156,22 @@ func chooseDSH(peers []lanPeer, preferred string) *lanPeer {
 	var fallback *lanPeer
 	for i := range peers {
 		p := &peers[i]
-		if p.Platform != "windows" || p.DSHAddress == "" {
+		if !p.canDispatch() {
 			continue
 		}
 		if p.ID == preferred {
 			return p
 		}
-		if fallback == nil || (!fallback.DSH.Connected && p.DSH.Connected) {
+		if fallback == nil || p.ID < fallback.ID {
 			fallback = p
 		}
 	}
 	return fallback
+}
+
+func (p lanPeer) canDispatch() bool {
+	return p.Platform == "windows" && p.Dispatch && p.DSHAddress != "" &&
+		p.DSH.Connected && p.DSH.SessionID != ""
 }
 
 func (a *App) updateLANStatus(s *lanService) {
@@ -189,7 +200,11 @@ func (a *App) bindingLANSelect(id string) lanView {
 	a.state.LAN.DSHDevice = id
 	a.mu.Unlock()
 	a.markDirty()
-	a.updateLANStatus(a.getLAN())
+	s := a.getLAN()
+	a.updateLANStatus(s)
+	if s != nil {
+		s.signal()
+	}
 	return a.bindingLANState()
 }
 
@@ -255,6 +270,14 @@ func (a *App) mergeReplica(other replica) error {
 	}
 	err := next.Replica.applyTo(&next)
 	if err == nil {
+		if a.dsh == nil && len(next.Queue) != 0 {
+			next.Queue = maps.Clone(next.Queue)
+			for _, m := range next.Messages {
+				if next.Queue[m.ID].Host != "" {
+					delete(next.Queue, m.ID)
+				}
+			}
+		}
 		err = a.persistLocked(next)
 	}
 	a.mu.Unlock()

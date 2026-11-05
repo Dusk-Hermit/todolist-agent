@@ -1145,33 +1145,58 @@
     return document.documentElement.classList.contains("android");
   }
 
+  function applyUpdate(view) {
+    const available = view.available;
+    const busy = ["checking", "downloading", "installing"].includes(view.phase);
+    const status = {
+      checking: "正在检查更新…",
+      downloading: "正在下载并校验更新…",
+      installing: "正在安装，请按系统提示操作…",
+      checked: available ? `发现新版本 ${available}` : "已是最新版本",
+    };
+    $("updateStatus").textContent = view.error || status[view.phase] || "";
+    $("updateBanner").classList.toggle("hidden", !available);
+    $("updateBannerText").textContent = view.error || (busy ? status[view.phase] : `发现新版本 ${available}`);
+    $("updateInstall").classList.toggle("hidden", !available);
+    $("updateAuto").checked = !!view.auto;
+    for (const id of ["updateCheck", "updateInstall", "updateBannerInstall"]) $(id).disabled = busy;
+  }
+
+  function installUpdate() {
+    call("todo_updateInstall").catch((e) => showToast("error", errText(e)));
+  }
+
   function applyLAN(view, fillInputs) {
     S.lan = view || {};
     const peers = S.lan.peers || [];
     const pending = S.lan.pending || [];
     const paused = peers.some((p) => p.paused);
+    const active = peers.find((p) => p.id === S.lan.activeDSH);
     if (fillInputs) {
       $("lanCode").value = S.lan.code || "";
       $("lanAddress").value = S.lan.address || "";
     }
     $("lanStatus").textContent = S.lan.error || (S.lan.code
-      ? `已启用 · 发现 ${peers.length} 台设备${paused ? " · DSH 处理完后自动同步" : ""}`
+      ? `已启用 · 发现 ${peers.length} 台设备${active ? " · 当前代发 " + active.name : ""}${paused ? " · DSH 处理完后自动同步" : ""}`
       : "在一台设备生成配对码，再粘贴到同一局域网内的其他设备。");
     $("lanPeers").innerHTML = peers.map((p) =>
-      `<li>${esc(p.name)} · ${esc(p.address)}${p.dshAddress ? " · DSH" : ""}</li>`).join("");
-    const choices = peers.filter((p) => p.platform === "windows" && p.dshAddress);
+      `<li>${esc(p.name)} · ${esc(p.address)}${p.dshAddress ? (p.dispatch ? " · DSH" : " · DSH 代发需升级") : ""}</li>`).join("");
+    const choices = peers.filter((p) => p.platform === "windows" && p.dispatch && p.dshAddress);
     const select = $("lanDSH");
-    const options = '<option value="">自动选择</option>' + choices.map((p) =>
+    const preferred = S.lan.dshDevice || "";
+    const offline = preferred && !choices.some((p) => p.id === preferred)
+      ? `<option value="${esc(preferred)}">首选电脑暂不可用</option>` : "";
+    const options = '<option value="">自动选择</option>' + offline + choices.map((p) =>
       `<option value="${esc(p.id)}">${esc(p.name)} · ${esc(p.dshAddress)}</option>`).join("");
     if (select.dataset.options !== options) {
       select.innerHTML = options;
       select.dataset.options = options;
     }
-    select.value = S.lan.activeDSH || "";
+    select.value = preferred;
     $("queueDetails").classList.toggle("hidden", pending.length === 0);
     $("queueTitle").textContent = `待发消息（${pending.length}）`;
     $("queueItems").innerHTML = pending.map((m) =>
-      `<li><time>${esc(journalDate(m.at))}</time> ${esc(m.text)}</li>`).join("");
+      `<li><time>${esc(journalDate(m.at))}</time> ${esc(m.text)}${m.host ? " · 等待原电脑确认" : ""}</li>`).join("");
     renderSendState();
   }
 
@@ -1450,8 +1475,11 @@
     if (last.status === "sending") {
       el.textContent = "正在发送…";
       el.className = "send-state";
-    } else if (last.status === "failed") {
-      el.textContent = "上次发送失败";
+    } else if (last.status === "queued") {
+      el.textContent = "已加入 DSH 队列";
+      el.className = "send-state";
+    } else if (last.status === "uncertain" || last.status === "failed") {
+      el.textContent = last.status === "uncertain" ? "执行状态待核对" : "上次发送失败";
       el.className = "send-state err";
       el.title = last.error || "";
     } else if (Date.now() - (last.at || 0) < 120000) {
@@ -1516,6 +1544,16 @@
     $("historyClose").addEventListener("click", closePanel);
     $("historyScrollTop").addEventListener("click", () => { $("historyList").scrollTop = 0; });
     $("settingsBtn").addEventListener("click", openSettings);
+    $("updateCheck").addEventListener("click", () => call("todo_updateCheck").catch((e) => showToast("error", errText(e))));
+    $("updateInstall").addEventListener("click", installUpdate);
+    $("updateBannerInstall").addEventListener("click", installUpdate);
+    $("updateAuto").addEventListener("change", async (e) => {
+      try { await call("todo_updateAuto", e.target.checked); }
+      catch (error) {
+        e.target.checked = !e.target.checked;
+        showToast("error", errText(error));
+      }
+    });
     $("lanRefresh").addEventListener("click", refreshLAN);
     $("lanSave").addEventListener("click", () => configureLAN($("lanCode").value, $("lanAddress").value));
     $("lanGenerate").addEventListener("click", () => configureLAN("generate", $("lanAddress").value));
@@ -1719,6 +1757,9 @@
         case "lan":
           applyLAN(d);
           break;
+        case "update":
+          applyUpdate(d);
+          break;
         case "lan-refresh":
           $("lanRefresh").disabled = false;
           showToast(d.count ? "success" : "info", d.count ? `已同步 ${d.count} 台设备` : (d.error || "未发现已配对设备"));
@@ -1743,6 +1784,7 @@
       const s = await call("todo_ready");
       applyState(s);
       applyLAN(await call("todo_lanState"));
+      applyUpdate(await call("todo_updateState"));
       autoGrow();
     } catch (e) {
       showToast("error", "初始化失败：" + errText(e));

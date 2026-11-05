@@ -320,6 +320,7 @@ func (c *DSHClient) reportError(err error) {
 	if c.app.setStatus(st) {
 		c.app.emitStatus()
 	}
+	c.expireActivePrompt()
 }
 
 func (c *DSHClient) connect(ctx context.Context) error {
@@ -630,7 +631,7 @@ func (c *DSHClient) refresh(ctx context.Context) error {
 	st.Connecting = false
 	st.Error = ""
 	st.BaseURL = base
-	st.SessionID = sessionID
+	st.SessionID = ""
 	st.CheckedAt = time.Now().UnixMilli()
 	st.Running = false
 	st.RunningSince = 0

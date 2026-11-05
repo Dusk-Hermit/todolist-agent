@@ -79,6 +79,7 @@ func TestLANQueuePersistsOrderAndDeduplicatesRetries(t *testing.T) {
 	}
 	desktop.mu.Lock()
 	desktop.state.QueueBatch = true
+	desktop.status.Connected = true
 	desktop.mu.Unlock()
 	if _, err := desktop.replicaForExchange(); !errors.Is(err, errBatchRunning) {
 		t.Fatalf("batch should pause replica exchange, got %v", err)

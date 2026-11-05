@@ -2,7 +2,7 @@ package main
 
 const (
 	appName    = "TodoList Agent"
-	appVersion = "0.3.0"
+	appVersion = "0.4.0"
 	appID      = "Dusk.TodoListAgent"
 
 	statusTodo    = "todo"
@@ -59,7 +59,7 @@ type HistoryEvent struct {
 type ChatMessage struct {
 	ID        string `json:"id"`
 	Text      string `json:"text"`
-	Status    string `json:"status"`         // sending | sent | queued | failed
+	Status    string `json:"status"`         // sending | sent | queued | failed | uncertain
 	Kind      string `json:"kind,omitempty"` // input | onboarding
 	Error     string `json:"error,omitempty"`
 	SessionID string `json:"sessionId,omitempty"`
@@ -96,21 +96,23 @@ type BridgeConfig struct {
 }
 
 type persistedState struct {
-	Queue         map[string]queuedPrompt `json:"queue,omitempty"`
-	QueueReceipts map[string]bool         `json:"queueReceipts,omitempty"`
-	QueueReadyAt  int64                   `json:"queueReadyAt,omitempty"`
-	QueueBatch    bool                    `json:"queueBatch,omitempty"`
-	ActivePrompt  *activePrompt           `json:"activePrompt,omitempty"`
-	LAN           lanConfig               `json:"lan"`
-	Replica       replica                 `json:"replica"`
-	Version       int                     `json:"version"`
-	Todos         []Todo                  `json:"todos"`
-	Events        []HistoryEvent          `json:"events"`
-	Messages      []ChatMessage           `json:"messages"`
-	Prefs         Prefs                   `json:"prefs"`
-	DSH           DSHConfig               `json:"dsh"`
-	Bridge        BridgeConfig            `json:"bridge"`
-	FocusID       string                  `json:"focusId,omitempty"`
+	AutoUpdate       bool                    `json:"autoUpdate,omitempty"`
+	Queue            map[string]queuedPrompt `json:"queue,omitempty"`
+	QueueReceipts    map[string]bool         `json:"queueReceipts,omitempty"`
+	QueueReadyAt     int64                   `json:"queueReadyAt,omitempty"`
+	QueueBatch       bool                    `json:"queueBatch,omitempty"`
+	ActivePrompt     *activePrompt           `json:"activePrompt,omitempty"`
+	UncertainPrompts map[string]activePrompt `json:"uncertainPrompts,omitempty"`
+	LAN              lanConfig               `json:"lan"`
+	Replica          replica                 `json:"replica"`
+	Version          int                     `json:"version"`
+	Todos            []Todo                  `json:"todos"`
+	Events           []HistoryEvent          `json:"events"`
+	Messages         []ChatMessage           `json:"messages"`
+	Prefs            Prefs                   `json:"prefs"`
+	DSH              DSHConfig               `json:"dsh"`
+	Bridge           BridgeConfig            `json:"bridge"`
+	FocusID          string                  `json:"focusId,omitempty"`
 }
 
 type DSHStatus struct {

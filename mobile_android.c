@@ -39,6 +39,18 @@ JNIEXPORT jbyteArray JNICALL Java_dev_todolist_agent_MainActivity_nativeDrain(
     return return_bytes(env, TodoDrain());
 }
 
+JNIEXPORT jbyteArray JNICALL Java_dev_todolist_agent_MainActivity_nativeTakeUpdate(
+        JNIEnv *env, jclass cls) {
+    return return_bytes(env, TodoTakeUpdate());
+}
+
+JNIEXPORT void JNICALL Java_dev_todolist_agent_MainActivity_nativeUpdateError(
+        JNIEnv *env, jclass cls, jbyteArray message) {
+    char *value = copy_bytes(env, message);
+    if (value) TodoUpdateError(value);
+    free(value);
+}
+
 JNIEXPORT jbyteArray JNICALL Java_dev_todolist_agent_MainActivity_nativeInvoke(
         JNIEnv *env, jclass cls, jbyteArray method, jbyteArray data) {
     char *name = copy_bytes(env, method);

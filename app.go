@@ -21,6 +21,7 @@ import (
 type App struct {
 	mu          sync.Mutex
 	stateEmitMu sync.Mutex
+	updates     updater
 
 	state     persistedState
 	dataPath  string
@@ -78,6 +79,7 @@ func (a *App) Shutdown() {
 	a.mu.Unlock()
 
 	a.stopLAN()
+	a.stopUpdateChecks()
 	a.saveNow()
 	if a.dsh != nil {
 		a.dsh.Stop()
