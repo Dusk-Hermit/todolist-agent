@@ -11,8 +11,8 @@ android {
         applicationId 'dev.todolist.agent'
         minSdk 26
         targetSdk 34
-        versionCode 404
-        versionName '0.4.4'
+        versionCode 405
+        versionName '0.4.5'
     }
 
     sourceSets.main.jniLibs.srcDir layout.buildDirectory.dir('go-jni')

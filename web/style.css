@@ -690,12 +690,6 @@ svg {
   background: rgba(var(--ink), 0.025);
 }
 
-.pill.agent {
-  color: #7d5f82;
-  border-color: rgba(155, 127, 158, 0.22);
-  background: rgba(155, 127, 158, 0.07);
-}
-
 .pill.doing {
   color: #8a5a63;
   border-color: rgba(185, 124, 136, 0.22);
@@ -2378,10 +2372,6 @@ kbd {
   font-size: 10px;
   white-space: nowrap;
   flex: 0 0 auto;
-}
-
-.crow-meta .agent {
-  color: #7d5f82;
 }
 
 .crow-actions {

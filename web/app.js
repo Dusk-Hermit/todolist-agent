@@ -450,7 +450,6 @@
       : dropped
         ? '<span class="pill dropped">已丢弃</span>'
         : "";
-    const sourcePill = t.source === "agent" ? '<span class="pill agent">DSH</span>' : "";
     const focusPill = focused ? '<span class="pill focus">专注</span>' : "";
     const subPill = children.length ? `<span class="pill subcount">${children.length} 子任务</span>` : "";
     const notes = t.notes ? `<div class="todo-notes">${esc(t.notes)}</div>` : "";
@@ -473,7 +472,7 @@
         <div class="todo-title" data-act="edit" title="点击编辑">${esc(t.title)}</div>
         ${notes}${reason}
         <div class="todo-meta">
-          ${statusPill}${focusPill}${sourcePill}${subPill}
+          ${statusPill}${focusPill}${subPill}
           <span>${esc(time)}</span>
         </div>
         ${subtasks}
@@ -505,7 +504,6 @@
         <div class="crow-title" data-act="edit" title="${esc(t.notes || t.title)}">${esc(t.title)}</div>
         <div class="crow-meta">
           ${focused ? '<span class="focus-tag">专注</span>' : ""}
-          ${t.source === "agent" ? '<span class="agent">DSH</span>' : ""}
           ${sub}
           <span>${esc(relTime(t.updatedAt || t.createdAt))}</span>
         </div>
@@ -721,7 +719,7 @@
       compact ? "compact" : "cards",
       S.filter,
       JSON.stringify(S.collapsedGroups),
-      allTodos().map((t) => [t.id, t.parentId, t.status, t.title, t.notes, t.priority, t.updatedAt, t.completedAt, t.droppedAt, t.dropReason, t.position, t.source].join("\u0001")).join("\u0002"),
+      allTodos().map((t) => [t.id, t.parentId, t.status, t.title, t.notes, t.priority, t.updatedAt, t.completedAt, t.droppedAt, t.dropReason, t.position].join("\u0001")).join("\u0002"),
     ].join("\u0003");
     if (!force && sig === S.lastTodosSig) {
       renderCounts();
