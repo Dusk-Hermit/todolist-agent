@@ -99,24 +99,13 @@ Every message sent from the desktop composer is stored as a **journal entry**, e
 - **Microsoft Edge WebView2 Runtime** (normally included with Windows 11)
 - **DeepSeek Harness** installed and running locally
 
-The app is currently developed against **DSH 0.2.x** and **TodoList Agent 0.2.9**.
+The Windows app targets **DSH 0.2.x**. The Android app supports Android 8.0 or later on arm64 and x86-64.
 
 ## Install
 
 ### From a release
 
-Download `TodoListAgent-win64.zip` from the [latest release](https://github.com/Dusk-Hermit/todolist-agent/releases/latest).
-
-1. Extract the archive.
-2. Run `install.cmd`, or from PowerShell:
-
-   ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
-   ```
-
-3. Launch **TodoList Agent** from the Start menu.
-
-The installer places the app in `%LOCALAPPDATA%\Programs\TodoList Agent` and creates a Start menu shortcut.
+Download and run `TodoListAgent-Setup-win64.exe` from [GitHub Releases](https://github.com/Dusk-Hermit/todolist-agent/releases). Setup installs for the current user, creates a Start menu shortcut, and downloads WebView2 if needed. The ZIP release also includes `install.cmd`.
 
 ### Portable
 
@@ -135,6 +124,17 @@ From then on:
 - Type a thought in the composer and press `Enter`.
 - DSH reads the message and updates the list through the local API.
 - Use the task actions to edit, split, drop, finish, or focus.
+
+## Android and LAN sync
+
+1. Install version 0.3.0 or later on Windows and install `TodoListAgent-android.apk` on each Android device. [GitHub Releases](https://github.com/Dusk-Hermit/todolist-agent/releases)
+2. Connect the devices to the same LAN. In **Settings → LAN sync**, generate a pairing code on Windows and paste it into each Android app.
+3. Paired devices discover each other and sync while the apps are running. The refresh button scans on demand and reports the result. If multicast is unavailable, enter the PC's LAN IPv4 address on Android. If Windows Firewall asks, allow the app on private networks. Discovery and sync use UDP and TCP port 17891.
+4. Android automatically picks an available DSH computer. You can also choose one from the list. Set the DSH address and port in the Windows app.
+
+Paired devices use encrypted connections and exchange changed records. Edits to separate tasks merge. If devices concurrently change the same record, the newer list replaces the older list. Deletion markers keep stale devices from restoring deleted tasks. Discovery follows the IPv4 multicast announcement and reply pattern used by [LocalSend](https://github.com/localsend/localsend).
+
+Android saves messages offline and shows the pending queue in Settings. After reconnecting, the PC waits about five seconds to collect the backlog and sorts the messages it has received by their creation times. It sends one at a time to DSH. New inputs join the pending queue during processing. Devices can still edit local tasks, and they exchange the batch results once DSH finishes.
 
 ## Daily use
 
@@ -269,12 +269,14 @@ cd todolist-agent
 .\build.ps1
 ```
 
-The build script closes a running copy, compiles the embedded web UI, embeds the icon and manifest, and writes `dist\TodoListAgent.exe` and `dist\TodoListAgent-win64.zip`.
+The build script embeds the web UI, icon, and manifest, then writes `dist\TodoListAgent.exe` and `dist\TodoListAgent-win64.zip`.
 
 ```powershell
-# Build a specific version
-.\build.ps1 -Version 0.2.9
+# Also build the Windows installer. Requires Inno Setup 6.
+.\build.ps1 -Installer
 ```
+
+For Android development, open `android/` in Android Studio with JDK 17, Gradle 8.6, Android SDK 34, and NDK 27.0.12077973. On Windows, `gradle -p android :app:assembleDebug` writes the APK to `android/app/build/outputs/apk/debug/`.
 
 ## Project layout
 
@@ -283,8 +285,11 @@ app.go        application state, task operations, snapshots
 store.go      persistence and migration
 dsh.go        DSH discovery, dedicated session, prompt delivery
 bridge.go     local loopback API used by DSH
-window.go     WebView2 bindings and window lifecycle
-win32.go      Windows integration: title bar, icon, tray behavior
+window_windows.go   WebView2 bindings and window lifecycle
+win32_windows.go    Windows integration for title bar, icon, and tray
+android/      Android Studio project
+lan*.go       device discovery, authenticated transport, and sync
+replica.go    incremental merge and conflict resolution
 web/          embedded HTML/CSS/JS interface
 install.ps1   per-user installer
 build.ps1     release build

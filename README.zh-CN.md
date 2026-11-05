@@ -101,24 +101,13 @@ TodoList Agent 把这一步搬到了桌面上：
 - **Microsoft Edge WebView2 Runtime**（Windows 11 通常自带）
 - 本机已安装并运行 **DeepSeek Harness**
 
-当前版本针对 **DSH 0.2.x** 与 **TodoList Agent 0.2.9** 开发。
+桌面端面向 **DSH 0.2.x**。Android 端支持 Android 8.0 及以上的 arm64 和 x86-64 设备。
 
 ## 安装
 
 ### 使用发布包
 
-从 [最新 Release](https://github.com/Dusk-Hermit/todolist-agent/releases/latest) 下载 `TodoListAgent-win64.zip`。
-
-1. 解压压缩包。
-2. 运行 `install.cmd`，或在 PowerShell 中执行：
-
-   ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
-   ```
-
-3. 从开始菜单启动 **TodoList Agent**。
-
-安装位置为 `%LOCALAPPDATA%\Programs\TodoList Agent`，安装器会创建开始菜单快捷方式。
+从 [GitHub Releases](https://github.com/Dusk-Hermit/todolist-agent/releases) 下载并运行 `TodoListAgent-Setup-win64.exe`。安装器会按当前用户安装、创建开始菜单快捷方式，并在系统缺少 WebView2 时联网补装。也可以解压 `TodoListAgent-win64.zip` 后运行 `install.cmd`。
 
 ### 免安装
 
@@ -137,6 +126,17 @@ TodoList Agent 把这一步搬到了桌面上：
 - 在底部输入想法，按 `Enter` 发送。
 - DSH 读取消息，通过本地接口更新清单。
 - 用任务操作区编辑、拆子任务、丢弃、完成或设专注。
+
+## Android 与局域网同步
+
+1. Windows 和 Android 都安装 0.3.0 或以上版本。Android 安装同一 [GitHub Release](https://github.com/Dusk-Hermit/todolist-agent/releases) 中的 `TodoListAgent-android.apk`。
+2. 将设备连到同一局域网。在电脑的 **设置 → 局域网同步** 生成配对码，复制到各 Android 设备并保存。
+3. 应用会自动发现和同步已配对设备。点击顶部的刷新按钮可以立即搜索并查看结果。组播被路由器隔离时，可在手机设置中填入电脑的局域网 IPv4 地址。Windows 防火墙提示时允许应用访问专用网络，发现和同步使用 UDP 和 TCP 17891。
+4. 手机会自动选择可用的 DSH 电脑，也可以在下拉框选择。电脑继续连接本机 DSH，可在桌面设置修改 DSH 地址和端口。Android 打开应用时参与同步。
+
+设备间传输采用配对加密。每次同步只传输有变化的记录。不同任务上的修改会合并，同一记录上的并发修改发生冲突时，以最近编辑的整份清单为准。删除会保留同步标记，避免旧设备恢复已删除的任务。发现机制参考了 [LocalSend](https://github.com/localsend/localsend) 的 IPv4 组播通告和应答。
+
+手机离线时可以连续保存多条消息，并在设置里查看待发队列。连接后，电脑先留出约五秒收集积压，再将已收到的消息按各设备创建时间排序，与本机输入一起逐条交给 DSH。后到的消息会加入尚未发出的队列。DSH 批量处理期间继续接收消息和本地任务编辑，清单在本批处理完成后恢复同步。
 
 ## 日常使用
 
@@ -271,12 +271,14 @@ cd todolist-agent
 .\build.ps1
 ```
 
-构建脚本会关闭正在运行的副本、编译内嵌 Web UI、写入图标和 manifest，并输出 `dist\TodoListAgent.exe` 与 `dist\TodoListAgent-win64.zip`。
+构建脚本会嵌入 Web UI、图标和 manifest，并输出 `dist\TodoListAgent.exe` 与 `dist\TodoListAgent-win64.zip`。
 
 ```powershell
-# 构建指定版本
-.\build.ps1 -Version 0.2.9
+# 另需 Inno Setup 6，生成 Windows 安装程序
+.\build.ps1 -Installer
 ```
+
+Android 开发时在 Android Studio 打开 `android/`。使用 JDK 17、Gradle 8.6、Android SDK 34 和 NDK 27.0.12077973。在 Windows 上也可以运行 `gradle -p android :app:assembleDebug`，APK 生成在 `android/app/build/outputs/apk/debug/`。
 
 ## 项目结构
 
@@ -285,8 +287,11 @@ app.go        应用状态、任务操作、快照
 store.go      持久化与迁移
 dsh.go        DSH 发现、专用会话、消息发送
 bridge.go     DSH 使用的本地回环接口
-window.go     WebView2 绑定与窗口生命周期
-win32.go      Windows 集成：标题栏、图标、托盘行为
+window_windows.go   WebView2 绑定与窗口生命周期
+win32_windows.go    Windows 标题栏、图标和窗口行为
+android/      Android Studio 项目
+lan*.go       设备发现、配对传输和同步
+replica.go    增量合并与冲突处理
 web/          内嵌 HTML/CSS/JS 界面
 install.ps1   当前用户安装器
 build.ps1     发布构建
