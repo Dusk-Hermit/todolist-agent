@@ -14,37 +14,32 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	webview2 "github.com/jchv/go-webview2"
 )
 
 // App owns all mutable state. Network work happens outside a.mu; snapshot()
 // copies slices so the web layer never observes a concurrent append.
 type App struct {
-	mu sync.Mutex
+	mu          sync.Mutex
+	stateEmitMu sync.Mutex
 
 	state     persistedState
 	dataPath  string
 	dirty     bool
 	saveTimer *time.Timer
 
-	quitting    bool
-	startHidden bool
-	pageReady   bool
+	quitting bool
+	platformState
 
-	web     webview2.WebView
-	hwnd    uintptr
-	oldProc uintptr
-	wndProc uintptr
+	lan         *lanService
+	lanError    string
+	lanConfigMu sync.Mutex
 
 	status   DSHStatus
 	sessions []SessionOption
 
-	dsh    *DSHClient
-	bridge *BridgeServer
-	tray   *trayCtx
-
-	iconPath string
-	logFile  *os.File
+	dsh     *DSHClient
+	bridge  *BridgeServer
+	logFile *os.File
 }
 
 func NewApp() *App {
@@ -73,32 +68,6 @@ func defaultState() persistedState {
 	}
 }
 
-// Start loads persisted state and starts the bridge plus the DSH poller.
-func (a *App) Start() error {
-	dir, err := dataDir()
-	if err != nil {
-		return err
-	}
-	a.dataPath = filepath.Join(dir, "data.json")
-	if err := a.load(); err != nil {
-		log.Printf("state load failed, starting fresh: %v", err)
-	}
-	a.iconPath = filepath.Join(dir, "icon.ico")
-	if old, err := os.ReadFile(a.iconPath); err != nil || !bytes.Equal(old, iconICO) {
-		if err := os.WriteFile(a.iconPath, iconICO, 0o644); err != nil {
-			log.Printf("write icon: %v", err)
-		}
-	}
-
-	a.bridge = newBridge(a)
-	if err := a.bridge.Start(); err != nil {
-		log.Printf("bridge start: %v", err)
-	}
-	a.dsh = newDSHClient(a)
-	a.dsh.Start()
-	return nil
-}
-
 func (a *App) Shutdown() {
 	a.mu.Lock()
 	if a.quitting {
@@ -108,6 +77,7 @@ func (a *App) Shutdown() {
 	a.quitting = true
 	a.mu.Unlock()
 
+	a.stopLAN()
 	a.saveNow()
 	if a.dsh != nil {
 		a.dsh.Stop()
@@ -172,7 +142,7 @@ func (a *App) snapshot() StatePayload {
 		Bridge:       bridge,
 		Sessions:     sessions,
 		DataPath:     a.dataPath,
-		Platform:     "windows",
+		Platform:     platformName,
 	}
 }
 
@@ -217,17 +187,20 @@ func (a *App) saveNow() {
 		a.mu.Unlock()
 		return
 	}
+	if a.state.Replica.Device != "" {
+		a.captureReplicaLocked()
+	}
 	b, err := json.MarshalIndent(a.state, "", "  ")
-	a.dirty = false
-	path := a.dataPath
-	a.mu.Unlock()
+	defer a.mu.Unlock()
 	if err != nil {
 		log.Printf("marshal state: %v", err)
 		return
 	}
-	if err := atomicWrite(path, b); err != nil {
+	if err := atomicWrite(a.dataPath, b); err != nil {
 		log.Printf("save state: %v", err)
+		return
 	}
+	a.dirty = false
 }
 
 func atomicWrite(path string, data []byte) error {
@@ -256,23 +229,18 @@ func atomicWrite(path string, data []byte) error {
 }
 
 func (a *App) emit(kind string, data any) {
-	a.mu.Lock()
-	w := a.web
-	ready := a.pageReady
-	a.mu.Unlock()
-	if w == nil || !ready {
-		return
-	}
 	payload, err := json.Marshal(map[string]any{"type": kind, "data": data})
 	if err != nil {
 		log.Printf("emit %s: %v", kind, err)
 		return
 	}
 	script := "window.__todoAgent&&window.__todoAgent.push(" + string(payload) + ")"
-	w.Dispatch(func() { w.Eval(script) })
+	a.dispatch(script)
 }
 
 func (a *App) emitState() {
+	a.stateEmitMu.Lock()
+	defer a.stateEmitMu.Unlock()
 	a.emit("state", a.snapshot())
 }
 
@@ -446,9 +414,10 @@ func (a *App) addTodo(in TodoInput, source, actor string) (Todo, error) {
 			return Todo{}, fmt.Errorf("父任务已完成或已丢弃，请先重新打开")
 		}
 	}
-	for i := range a.state.Todos {
-		if a.state.Todos[i].ParentID == parentID {
-			a.state.Todos[i].Position++
+	position := 0
+	for _, sibling := range a.state.Todos {
+		if sibling.ParentID == parentID {
+			position = min(position, sibling.Position-1)
 		}
 	}
 	t := Todo{
@@ -462,7 +431,7 @@ func (a *App) addTodo(in TodoInput, source, actor string) (Todo, error) {
 		CreatedAt:       now,
 		UpdatedAt:       now,
 		ParentID:        parentID,
-		Position:        0,
+		Position:        position,
 		SourceMessageID: sourceID,
 		SourceText:      sourceText,
 		SourceAt:        sourceAt,
@@ -485,6 +454,9 @@ func (a *App) addTodo(in TodoInput, source, actor string) (Todo, error) {
 		SourceMessageID: sourceID, OriginalText: truncateRunes(sourceText, 500),
 		After: cloneTodoPtr(t),
 	})
+	if a.state.Replica.Device != "" {
+		a.captureReplicaLocked()
+	}
 	a.mu.Unlock()
 	a.markDirty()
 	a.emitState()
@@ -653,6 +625,9 @@ func (a *App) moveTodo(id, priority, beforeID string, after bool, actor string) 
 		Before:          cloneTodoPtr(before),
 		After:           cloneTodoPtr(moved),
 	})
+	if a.state.Replica.Device != "" {
+		a.captureReplicaLocked()
+	}
 	a.mu.Unlock()
 	a.markDirty()
 	a.emitState()
@@ -779,6 +754,9 @@ func (a *App) updateTodo(id string, patch TodoPatch, actor string) (Todo, error)
 		SourceMessageID: after.SourceMessageID, OriginalText: truncateRunes(after.SourceText, 500),
 		Before: cloneTodoPtr(before), After: cloneTodoPtr(after),
 	})
+	if a.state.Replica.Device != "" {
+		a.captureReplicaLocked()
+	}
 	a.mu.Unlock()
 	a.markDirty()
 	a.emitState()
@@ -827,6 +805,9 @@ func (a *App) setFocus(id, actor string) (string, error) {
 		}
 	}
 	a.state.FocusID = id
+	if a.state.Replica.Device != "" {
+		a.captureReplicaLocked()
+	}
 	a.mu.Unlock()
 	a.markDirty()
 	a.emitState()
@@ -885,6 +866,9 @@ func (a *App) deleteTodo(id, actor string) error {
 		OriginalText:    truncateRunes(before.SourceText, 500),
 		Before:          cloneTodoPtr(before),
 	})
+	if a.state.Replica.Device != "" {
+		a.captureReplicaLocked()
+	}
 	a.mu.Unlock()
 	a.markDirty()
 	a.emitState()

@@ -507,6 +507,7 @@ func (c *DSHClient) activate(ctx context.Context, base string, secret []byte, it
 
 	a.mu.Lock()
 	a.state.DSH.SessionID = selected
+	a.state.QueueReadyAt = max(a.state.QueueReadyAt, time.Now().Add(promptCollectTime).UnixMilli())
 	a.mu.Unlock()
 	a.markDirty()
 
@@ -698,6 +699,7 @@ func (c *DSHClient) refresh(ctx context.Context) error {
 			a.emitState()
 		}
 	}
+	c.pumpQueue(ctx, row, items)
 	return nil
 }
 

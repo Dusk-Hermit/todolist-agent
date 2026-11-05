@@ -2,7 +2,7 @@ package main
 
 const (
 	appName    = "TodoList Agent"
-	appVersion = "0.2.9"
+	appVersion = "0.3.0"
 	appID      = "Dusk.TodoListAgent"
 
 	statusTodo    = "todo"
@@ -96,14 +96,21 @@ type BridgeConfig struct {
 }
 
 type persistedState struct {
-	Version  int            `json:"version"`
-	Todos    []Todo         `json:"todos"`
-	Events   []HistoryEvent `json:"events"`
-	Messages []ChatMessage  `json:"messages"`
-	Prefs    Prefs          `json:"prefs"`
-	DSH      DSHConfig      `json:"dsh"`
-	Bridge   BridgeConfig   `json:"bridge"`
-	FocusID  string         `json:"focusId,omitempty"`
+	Queue         map[string]queuedPrompt `json:"queue,omitempty"`
+	QueueReceipts map[string]bool         `json:"queueReceipts,omitempty"`
+	QueueReadyAt  int64                   `json:"queueReadyAt,omitempty"`
+	QueueBatch    bool                    `json:"queueBatch,omitempty"`
+	ActivePrompt  *activePrompt           `json:"activePrompt,omitempty"`
+	LAN           lanConfig               `json:"lan"`
+	Replica       replica                 `json:"replica"`
+	Version       int                     `json:"version"`
+	Todos         []Todo                  `json:"todos"`
+	Events        []HistoryEvent          `json:"events"`
+	Messages      []ChatMessage           `json:"messages"`
+	Prefs         Prefs                   `json:"prefs"`
+	DSH           DSHConfig               `json:"dsh"`
+	Bridge        BridgeConfig            `json:"bridge"`
+	FocusID       string                  `json:"focusId,omitempty"`
 }
 
 type DSHStatus struct {

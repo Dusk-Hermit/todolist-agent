@@ -1,7 +1,6 @@
 package main
 
 import (
-	"embed"
 	"fmt"
 	"log"
 	"os"
@@ -11,34 +10,6 @@ import (
 
 	webview2 "github.com/jchv/go-webview2"
 )
-
-//go:embed web/index.html web/style.css web/app.js assets/icon.ico
-var embedded embed.FS
-
-var iconICO []byte
-
-func init() {
-	iconICO, _ = embedded.ReadFile("assets/icon.ico")
-}
-
-func buildHTML() (string, error) {
-	index, err := embedded.ReadFile("web/index.html")
-	if err != nil {
-		return "", err
-	}
-	css, err := embedded.ReadFile("web/style.css")
-	if err != nil {
-		return "", err
-	}
-	js, err := embedded.ReadFile("web/app.js")
-	if err != nil {
-		return "", err
-	}
-	html := string(index)
-	html = strings.Replace(html, "/*{{CSS}}*/", string(css), 1)
-	html = strings.Replace(html, "/*{{JS}}*/", string(js), 1)
-	return html, nil
-}
 
 func createMainWindow(a *App) webview2.WebView {
 	dir, _ := dataDir()
@@ -96,6 +67,9 @@ func createMainWindow(a *App) webview2.WebView {
 		"todo_writeAgents":     a.bindingWriteAgents,
 		"todo_diagnostics":     a.bindingDiagnostics,
 		"todo_quit":            a.bindingQuit,
+		"todo_lanState":        a.bindingLANState,
+		"todo_lanConfigure":    a.bindingLANConfigure,
+		"todo_lanRefresh":      a.bindingLANRefresh,
 	}
 	for name, fn := range bindings {
 		if err := w.Bind(name, fn); err != nil {
@@ -177,10 +151,9 @@ func (a *App) quitApp() {
 		a.mu.Unlock()
 		return
 	}
-	a.quitting = true
 	a.mu.Unlock()
 	a.saveWindowState()
-	a.saveNow()
+	a.Shutdown()
 	if a.web != nil {
 		w := a.web
 		w.Dispatch(func() {
@@ -209,64 +182,6 @@ func (a *App) bindingReady() (StatePayload, error) {
 		a.emitStatus()
 	})
 	return a.snapshot(), nil
-}
-
-func (a *App) bindingGetState() StatePayload {
-	return a.snapshot()
-}
-
-func (a *App) bindingSendInput(text string) (map[string]any, error) {
-	if a.dsh == nil {
-		return nil, fmt.Errorf("DSH 客户端尚未启动")
-	}
-	id, err := a.dsh.SendPrompt(text, false)
-	if err != nil {
-		return nil, err
-	}
-	return map[string]any{"ok": true, "id": id}, nil
-}
-
-func (a *App) bindingAddTodo(in TodoInput) (Todo, error) {
-	return a.addTodo(in, "user", "user")
-}
-
-func (a *App) bindingUpdateTodo(id string, patch TodoPatch) (Todo, error) {
-	return a.updateTodo(id, patch, "user")
-}
-
-func (a *App) bindingDeleteTodo(id string) (map[string]any, error) {
-	if err := a.deleteTodo(id, "user"); err != nil {
-		return nil, err
-	}
-	return map[string]any{"ok": true}, nil
-}
-
-func (a *App) bindingSetTodoStatus(id, status string) (Todo, error) {
-	return a.setTodoStatus(id, status, "user")
-}
-
-func (a *App) bindingDropTodo(id, reason string) (Todo, error) {
-	return a.dropTodo(id, reason, "user")
-}
-
-func (a *App) bindingMoveTodo(id, priority, beforeID string, after bool) (map[string]any, error) {
-	t, err := a.moveTodo(id, priority, beforeID, after, "user")
-	if err != nil {
-		return nil, err
-	}
-	return map[string]any{"ok": true, "todo": t}, nil
-}
-
-func (a *App) bindingSetFocus(id string) (map[string]any, error) {
-	focus, err := a.setFocus(id, "user")
-	if err != nil {
-		return nil, err
-	}
-	return map[string]any{"ok": true, "focusId": focus}, nil
-}
-
-func (a *App) bindingJournal(beforeAt int64, limit int, query string) JournalPage {
-	return a.journalPage(beforeAt, limit, query)
 }
 
 func (a *App) bindingSavePrefs(p Prefs) map[string]any {

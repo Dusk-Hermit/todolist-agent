@@ -2776,3 +2776,46 @@ kbd {
     grid-template-columns: 1fr;
   }
 }
+
+.lan-list {
+  margin: 0;
+  padding-left: 1.3em;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+#queueDetails { font-size: 12px; }
+#queueItems { max-height: 160px; overflow: auto; }
+#lanRefresh:disabled { opacity: .45; }
+html:not(.android) .mobile-only,
+.android .desktop-only { display: none; }
+
+.android .top-actions { gap: 2px; }
+.android .toolbar { gap: 5px; }
+.android .filter { padding-inline: 6px; }
+.android .button-row { flex-wrap: wrap; }
+.android .todo-actions,
+.android .sactions,
+.android .crow-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+.android .todo-actions {
+  position: static;
+  grid-column: 2 / -1;
+  justify-self: end;
+  width: max-content;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.android .crow { grid-template-columns: 18px max-content minmax(0, 1fr) auto; }
+.android .subtask .smeta { display: none; }
+.android .sactions,
+.android .crow-actions {
+  position: static;
+  transform: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+}

@@ -54,7 +54,7 @@
       </div>
     </div>
     <div class="top-actions">
-      <button class="icon-btn" id="pinBtn" title="窗口置顶" aria-label="窗口置顶" aria-pressed="false">
+      <button class="icon-btn desktop-only" id="pinBtn" title="窗口置顶" aria-label="窗口置顶" aria-pressed="false">
         <svg class="icon"><use href="#i-pin"/></svg>
       </button>
       <button class="icon-btn" id="journalBtn" title="想法回顾" aria-label="想法回顾">
@@ -62,6 +62,9 @@
       </button>
       <button class="icon-btn" id="historyBtn" title="操作记录" aria-label="操作记录">
         <svg class="icon"><use href="#i-clock"/></svg>
+      </button>
+      <button class="icon-btn" id="lanRefresh" title="发现并同步局域网设备" aria-label="发现并同步局域网设备">
+        <svg class="icon"><use href="#i-refresh"/></svg>
       </button>
       <button class="icon-btn" id="settingsBtn" title="设置" aria-label="设置">
         <svg class="icon"><use href="#i-gear"/></svg>
@@ -237,6 +240,10 @@
         <div class="source-text" id="taskSourceText"></div>
       </div>
       <p class="field-hint" id="taskHint">任务会保存在本地；如果已接入 DSH，也可以让 DSH 来维护它。</p>
+      <div class="button-row mobile-only" id="taskOrder">
+        <button class="ghost-btn" id="taskEarlier">上移</button>
+        <button class="ghost-btn" id="taskLater">下移</button>
+      </div>
     </div>
     <footer class="modal-foot">
       <button class="danger-btn hidden" id="taskDrop">
@@ -266,6 +273,34 @@
     <div class="modal-body settings-body">
 
       <section class="settings-section">
+        <div class="section-title">局域网同步</div>
+        <p class="field-hint" id="lanStatus">在一台设备生成配对码，再粘贴到同一局域网内的其他设备。</p>
+        <label class="field">
+          <span>配对码</span>
+          <input id="lanCode" type="password" placeholder="生成或粘贴配对码" autocomplete="off" spellcheck="false">
+        </label>
+        <label class="field">
+          <span>手动设备地址（可选）</span>
+          <input id="lanAddress" placeholder="例如 192.168.1.20:17891" autocomplete="off" spellcheck="false">
+        </label>
+        <div class="button-row">
+          <button class="primary-btn" id="lanSave">保存配对</button>
+          <button class="ghost-btn" id="lanGenerate">生成配对码</button>
+          <button class="ghost-btn" id="lanCopy">复制</button>
+          <button class="ghost-btn" id="lanDisable">停用</button>
+        </div>
+        <label class="field mobile-only">
+          <span>代发 DSH 的电脑</span>
+          <select id="lanDSH"></select>
+        </label>
+        <ul id="lanPeers" class="lan-list"></ul>
+        <details id="queueDetails" class="hidden">
+          <summary id="queueTitle">待发消息</summary>
+          <ul id="queueItems" class="lan-list"></ul>
+        </details>
+      </section>
+
+      <section class="settings-section desktop-only">
         <div class="section-title"><span class="section-index">01</span> 连接 DeepSeek Harness</div>
         <div class="kv-status" id="connStatus">
           <span class="dot"></span><span id="connStatusText">正在连接…</span>
@@ -297,8 +332,8 @@
       </section>
 
       <section class="settings-section">
-        <div class="section-title"><span class="section-index">02</span> 窗口行为</div>
-        <label class="toggle-row">
+        <div class="section-title"><span class="section-index">02</span> 显示设置</div>
+        <label class="toggle-row desktop-only">
           <input type="checkbox" id="alwaysOnTop">
           <span class="toggle"></span>
           <span class="toggle-copy"><b>窗口置顶</b><small>清单保持在其他窗口之上</small></span>
@@ -308,7 +343,7 @@
           <span class="toggle"></span>
           <span class="toggle-copy"><b>紧凑列表</b><small>一行一个任务，适合积累很多条目后快速浏览</small></span>
         </label>
-        <div class="shortcut-grid">
+        <div class="shortcut-grid desktop-only">
           <div><kbd>Enter</kbd><span>发送</span></div>
           <div><kbd>Shift</kbd><kbd>Enter</kbd><span>换行</span></div>
           <div><kbd>Ctrl</kbd><kbd>N</kbd><span>新建任务</span></div>
@@ -316,7 +351,7 @@
         </div>
       </section>
 
-      <section class="settings-section">
+      <section class="settings-section desktop-only">
         <div class="section-title"><span class="section-index">03</span> Agent 任务接口</div>
         <p class="field-hint">DSH 通过这个本地接口读写清单。接口只监听 127.0.0.1，并使用随机 token 鉴权。</p>
         <div class="copy-row">
@@ -350,7 +385,7 @@
           <div class="copy-value"><span>数据文件</span><code id="dataPath">—</code></div>
           <button class="icon-btn" id="copyDataPath" title="复制路径" aria-label="复制路径"><svg class="icon"><use href="#i-copy"/></svg></button>
         </div>
-        <div class="button-row">
+        <div class="button-row desktop-only">
           <button class="ghost-btn" id="diagnosticsBtn">复制诊断信息</button>
           <button class="ghost-btn danger-text" id="quitBtn">退出应用</button>
         </div>
@@ -358,9 +393,9 @@
 
       <section class="settings-section about">
         <div class="section-title"><span class="section-index">05</span> 关于</div>
-        <p><b>TodoList Agent <span id="aboutVersion">0.2.9</span></b><br>
-        用 Go + WebView2 构建的轻量桌面清单。通过 DSH 的本地 Web API 直接向当前会话发送输入，并把 DSH 的工具调用同步回清单。</p>
-        <p class="muted">连接原理：读取 <code>%USERPROFILE%\.dsh\.credentials.yaml</code> 中的本地签名密钥，签发一个仅限 127.0.0.1 的会话 Cookie；输入通过 <code>session/prompt</code> 进入当前会话。</p>
+        <p><b>TodoList Agent <span id="aboutVersion">0.3.0</span></b></p>
+        <p class="desktop-only">桌面清单通过 DSH 的本地 Web API 向当前会话发送输入，并接收 DSH 对任务的修改。</p>
+        <p class="mobile-only">任务和待发消息会保存在手机上。配对后，手机通过局域网同步任务，并将待发消息交给电脑处理。</p>
       </section>
 
     </div>

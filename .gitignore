@@ -25,3 +25,12 @@ Thumbs.db
 .idea/
 
 /video/
+
+# Android build and local configuration
+/android/.gradle/
+/android/**/build/
+/android/local.properties
+*.apk
+*.aab
+*.jks
+*.keystore

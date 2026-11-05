@@ -214,6 +214,7 @@
     const wasRunning = !!(S.data.dsh && S.data.dsh.running);
     S.data.dsh = st;
     renderStatus();
+    renderSessionChip();
     renderRunning();
     updateSetupBanner();
     if (S.settingsOpen) updateSettings(false);
@@ -268,8 +269,8 @@
     } else {
       state = "error";
       t = "未连接 DSH";
-      s = "请确认 DeepSeek Harness 正在运行";
-      m = "重试";
+      s = isMobile() ? "等待配对的电脑 · 可离线保存消息" : "请确认 DeepSeek Harness 正在运行";
+      m = isMobile() ? "离线" : "重试";
     }
 
     card.dataset.state = state;
@@ -280,7 +281,7 @@
     stat.textContent = m;
     brandSub.textContent = d.connected
       ? (d.running ? "DSH 正在处理当前任务" : "与当前 DSH 会话同步")
-      : (d.connecting ? "正在查找本地会话…" : "等待 DeepSeek Harness");
+      : (isMobile() ? "等待局域网内的 DSH 电脑" : (d.connecting ? "正在查找本地会话…" : "等待 DeepSeek Harness"));
   }
 
   function renderSessionChip() {
@@ -991,7 +992,7 @@
     const d = (S.data && S.data.dsh) || {};
     const sid = d.sessionId || "";
     const onboarded = !!(S.data && S.data.prefs && S.data.prefs.onboardedSessions && S.data.prefs.onboardedSessions[sid]);
-    const show = !!(d.connected && sid && !onboarded && !S.dismissed);
+    const show = !!(!isMobile() && d.connected && sid && !onboarded && !S.dismissed);
     el.classList.toggle("hidden", !show);
   }
 
@@ -1028,6 +1029,7 @@
     $("taskHint").textContent = hint;
     $("taskDelete").classList.toggle("hidden", !t);
     $("taskDrop").classList.toggle("hidden", !t || (t && t.status === "dropped"));
+    $("taskOrder").classList.toggle("hidden", !t || !["todo", "doing"].includes(t.status));
     syncDropFields();
     const sourceBox = $("taskSourceBox");
     if (t && (t.sourceText || t.sourceMessageID)) {
@@ -1129,6 +1131,7 @@
     $("settingsLayer").classList.remove("hidden");
     $("scrim").classList.remove("hidden");
     updateSettings(true);
+    call("todo_lanState").then((view) => applyLAN(view, true)).catch((e) => showToast("error", errText(e)));
     setTimeout(() => $("settingsClose").focus(), 30);
   }
 
@@ -1136,6 +1139,77 @@
     $("settingsLayer").classList.add("hidden");
     S.settingsOpen = false;
     syncScrim();
+  }
+
+  function isMobile() {
+    return document.documentElement.classList.contains("android");
+  }
+
+  function applyLAN(view, fillInputs) {
+    S.lan = view || {};
+    const peers = S.lan.peers || [];
+    const pending = S.lan.pending || [];
+    const paused = peers.some((p) => p.paused);
+    if (fillInputs) {
+      $("lanCode").value = S.lan.code || "";
+      $("lanAddress").value = S.lan.address || "";
+    }
+    $("lanStatus").textContent = S.lan.error || (S.lan.code
+      ? `已启用 · 发现 ${peers.length} 台设备${paused ? " · DSH 处理完后自动同步" : ""}`
+      : "在一台设备生成配对码，再粘贴到同一局域网内的其他设备。");
+    $("lanPeers").innerHTML = peers.map((p) =>
+      `<li>${esc(p.name)} · ${esc(p.address)}${p.dshAddress ? " · DSH" : ""}</li>`).join("");
+    const choices = peers.filter((p) => p.platform === "windows" && p.dshAddress);
+    const select = $("lanDSH");
+    const options = '<option value="">自动选择</option>' + choices.map((p) =>
+      `<option value="${esc(p.id)}">${esc(p.name)} · ${esc(p.dshAddress)}</option>`).join("");
+    if (select.dataset.options !== options) {
+      select.innerHTML = options;
+      select.dataset.options = options;
+    }
+    select.value = S.lan.activeDSH || "";
+    $("queueDetails").classList.toggle("hidden", pending.length === 0);
+    $("queueTitle").textContent = `待发消息（${pending.length}）`;
+    $("queueItems").innerHTML = pending.map((m) =>
+      `<li><time>${esc(journalDate(m.at))}</time> ${esc(m.text)}</li>`).join("");
+    renderSendState();
+  }
+
+  async function configureLAN(code, address) {
+    try {
+      const view = await call("todo_lanConfigure", code, address);
+      applyLAN(view, true);
+      showToast(view.error ? "error" : "success", view.error || (view.code ? "已保存局域网配对" : "局域网同步已停用"));
+    } catch (e) {
+      showToast("error", errText(e));
+    }
+  }
+
+  async function refreshLAN() {
+    const button = $("lanRefresh");
+    if (button.disabled) return;
+    button.disabled = true;
+    try {
+      await call("todo_lanRefresh");
+    } catch (e) {
+      showToast("info", errText(e));
+      button.disabled = false;
+    }
+  }
+
+  async function moveOnPhone(offset) {
+    const task = findTodo(S.editingId);
+    if (!task) return;
+    const siblings = allTodos().filter((t) => (t.parentId || "") === (task.parentId || "") &&
+      t.priority === task.priority && t.status === task.status);
+    siblings.sort((a, b) => a.position - b.position || b.createdAt - a.createdAt);
+    const target = siblings[siblings.findIndex((t) => t.id === task.id) + offset];
+    if (!target) return;
+    try {
+      await call("todo_moveTodo", task.id, task.priority, target.id, offset > 0);
+    } catch (e) {
+      showToast("error", errText(e));
+    }
   }
 
   function updateSettings(fillInputs) {
@@ -1332,10 +1406,6 @@
       ta.focus();
       return;
     }
-    if (!connected()) {
-      showToast("error", "DSH 未连接，先到设置里选择会话");
-      return;
-    }
     const btn = $("sendBtn");
     btn.classList.add("disabled");
     S.localSentAt = Date.now();
@@ -1344,8 +1414,8 @@
       ta.value = "";
       autoGrow();
       ta.focus();
-      showToast("success", "已发送到 DSH");
-      $("sendState").textContent = "已发送 · 等待 DSH 接收";
+      showToast("success", connected() ? "已加入待发队列" : "已保存在本机，连接后自动发送");
+      $("sendState").textContent = "已加入待发队列";
       $("sendState").className = "send-state ok";
     } catch (e) {
       showToast("error", "发送失败：" + errText(e));
@@ -1359,6 +1429,17 @@
   function renderSendState() {
     const el = $("sendState");
     if (!el) return;
+    const pending = S.lan && S.lan.pending;
+    if (pending && pending.length) {
+      el.textContent = `${pending.length} 条待发消息`;
+      el.className = "send-state";
+      return;
+    }
+    if (S.lan && (S.lan.peers || []).some((p) => p.paused)) {
+      el.textContent = "DSH 正在处理 · 完成后同步";
+      el.className = "send-state";
+      return;
+    }
     const msgs = (S.data && S.data.messages) || [];
     const last = msgs[msgs.length - 1];
     if (!last) {
@@ -1435,6 +1516,17 @@
     $("historyClose").addEventListener("click", closePanel);
     $("historyScrollTop").addEventListener("click", () => { $("historyList").scrollTop = 0; });
     $("settingsBtn").addEventListener("click", openSettings);
+    $("lanRefresh").addEventListener("click", refreshLAN);
+    $("lanSave").addEventListener("click", () => configureLAN($("lanCode").value, $("lanAddress").value));
+    $("lanGenerate").addEventListener("click", () => configureLAN("generate", $("lanAddress").value));
+    $("lanDisable").addEventListener("click", () => configureLAN("", ""));
+    $("lanCopy").addEventListener("click", () => copyText($("lanCode").value, "配对码已复制"));
+    $("lanDSH").addEventListener("change", async (e) => {
+      try { applyLAN(await call("todo_lanSelect", e.target.value)); }
+      catch (error) { showToast("error", errText(error)); }
+    });
+    $("taskEarlier").addEventListener("click", () => moveOnPhone(-1));
+    $("taskLater").addEventListener("click", () => moveOnPhone(1));
     $("settingsClose").addEventListener("click", closeSettings);
     $("sessionChip").addEventListener("click", openSettings);
     $("scrim").addEventListener("click", () => {
@@ -1579,9 +1671,10 @@
     });
 
     const ta = $("input");
+    if (isMobile()) $("composerHint").textContent = "点发送 · 离线会先保存";
     ta.addEventListener("input", autoGrow);
     ta.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+      if (!isMobile() && e.key === "Enter" && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
         sendInput();
       }
@@ -1623,6 +1716,13 @@
           if (S.data) S.data.sessions = d || [];
           if (S.settingsOpen) renderSessionSelect();
           break;
+        case "lan":
+          applyLAN(d);
+          break;
+        case "lan-refresh":
+          $("lanRefresh").disabled = false;
+          showToast(d.count ? "success" : "info", d.count ? `已同步 ${d.count} 台设备` : (d.error || "未发现已配对设备"));
+          break;
         case "toast":
           showToast((d && d.kind) || "info", (d && d.text) || "");
           break;
@@ -1642,6 +1742,7 @@
     try {
       const s = await call("todo_ready");
       applyState(s);
+      applyLAN(await call("todo_lanState"));
       autoGrow();
     } catch (e) {
       showToast("error", "初始化失败：" + errText(e));

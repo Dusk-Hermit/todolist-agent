@@ -48,6 +48,7 @@ func main() {
 		return
 	}
 
+	defer app.Shutdown()
 	w := createMainWindow(app)
 	if w == nil {
 		messageBox(appName, "无法启动 WebView2 界面。\n\n请确认系统已安装 Microsoft Edge WebView2 Runtime。")
@@ -55,7 +56,6 @@ func main() {
 	}
 	startTray(app)
 	w.Run()
-	app.Shutdown()
 }
 
 func initLogging() {
