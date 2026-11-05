@@ -141,9 +141,17 @@ TodoList Agent 把这一步搬到了桌面上：
 
 多电脑代发请将手机和执行 DSH 的电脑都升级到 0.4.0 或更高版本。等待原电脑确认的消息保留原归属，避免超时后在两台电脑重复执行。各电脑的 DSH 会话上下文保存在原电脑。组播受限时可用逗号分隔多个手动地址。
 
+### 安全使用局域网同步
+
+- **在可信的家庭或办公网络使用。** 公共或访客 Wi‑Fi 上建议在「设置 → 局域网同步 → 停用」关闭同步。保持 Windows 防火墙开启，仅在可信网络上允许应用访问专用网络。避免在路由器上把 UDP 和 TCP 17891 端口转发到公网。 [Windows 防火墙网络配置文件](https://learn.microsoft.com/en-us/windows/security/operating-system-security/network-security/windows-firewall/#firewall-profiles)
+- **把配对码当作密码保管。** 拿到配对码且能通过网络访问设备的人，可以冒充已配对的设备，读取或修改同步数据，也可以向已配对电脑上的 DSH 提交消息。配对码泄露或配对设备遗失时，生成新配对码，只给仍然信任的设备重新配对。
+- **被截获的发现通告可以被重放。** 重放可能让应用尝试连接错误地址，干扰发现。同步和代发会另建加密连接并用配对码验证身份。仅重放通告无法读取任务或注入消息。
+
 ## 更新
 
 Windows 和 Android 启动时自动检查 GitHub Release，也可以在「设置 → 关于」手动检查。发现新版本后，点击「一键更新」即可下载并校验相应安装包。Windows 完成安装后会重新启动应用。Android 可以在同一处开启自动下载并安装，系统可能要求允许安装来源或确认。0.3.0 及更早版本首次升级需要手动安装新版。
+
+请从本项目的 GitHub Releases 下载安装包。Windows 更新器通过 HTTPS 获取 GitHub 提供的 SHA‑256 摘要并校验安装包，因此依赖仓库发布权限的安全性。目前没有独立的发布者签名校验。
 
 ## 日常使用
 
@@ -173,6 +181,8 @@ Windows 和 Android 启动时自动检查 GitHub Release，也可以在「设置
 4. 在 `127.0.0.1:13800–13920` 范围内扫描，并用 `session/list` 验证。
 
 认证时，应用读取 `%USERPROFILE%\.dsh\.credentials.yaml` 中 `client-connection/browser-session` 的密钥，按 DSH 自己的格式签出短期会话 Cookie。密钥只在本机使用，不会写入任务数据。
+
+建议让 DSH 只监听 `127.0.0.1` 等回环地址。Android 把消息交给已配对的 Windows 应用，由电脑在本机联系 DSH。如果电脑上的其他进程抢占候选端口并模仿 DSH 接口，它可能收到代发消息和短期 Cookie。Windows 如果接受了伪造回复，回复可能作为文本同步到 Android 的操作记录。发送敏感内容前，先启动你信任的 DSH 并核对连接端口。确需配置远程 DSH 时，使用带有效证书的 HTTPS 地址。
 
 ### 专用会话
 
@@ -259,7 +269,7 @@ POST /api/todos
 | `%APPDATA%\TodoListAgent\bridge.json` | 本地桥接地址与 Bearer Token |
 | `%APPDATA%\TodoListAgent\icon.ico` | 运行时窗口图标 |
 
-- 数据保存在本机。
+- 任务、想法和操作记录保存在本机。启用局域网同步后，这些数据会同步到配对设备。
 - 桥接服务只监听回环地址。
 - 凭据读取自 DSH 自己的本地凭据文件，不会进入任务正文或想法回顾。
 - 应用不截屏、不控制键盘、不自动化 DSH 界面。

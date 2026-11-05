@@ -139,9 +139,17 @@ Android saves messages offline and shows the pending queue in Settings. After re
 
 For multi-PC routing, upgrade Android and every DSH computer to 0.4.0 or later. A prompt awaiting acknowledgement stays assigned to its original computer so that a connection failure cannot replay it on another computer. Each DSH session keeps its own context. Use comma-separated IPv4 addresses when multicast discovery is unavailable.
 
+### Using LAN sync safely
+
+- **Use a trusted home or office network.** Avoid LAN sync on public or guest Wi-Fi. To turn it off, choose **Settings → LAN sync → Disable**. On Windows, keep the firewall enabled and allow the app only on trusted private networks. Keep UDP and TCP port 17891 off internet-facing router port forwards. [Windows Firewall profiles](https://learn.microsoft.com/en-us/windows/security/operating-system-security/network-security/windows-firewall/#firewall-profiles)
+- **Keep the pairing code private.** Anyone with the code and network access to your devices can impersonate a paired device, read or change synced data, and submit prompts to a paired Windows computer's DSH. If the code leaks or a paired device is lost, generate a new code and re-pair the devices you still trust.
+- **Captured discovery announcements can be replayed.** A replay can make the app try to connect to the wrong address and interfere with discovery. Sync and prompt delivery use a separate encrypted connection authenticated with the pairing code. Replaying an announcement alone cannot read tasks or inject prompts.
+
 ## Updates
 
 Both apps check GitHub Releases at startup. **Settings → About** also offers a manual check and one-click update. The updater verifies the downloaded package. Windows restarts the app after setup. Android offers optional automatic downloading and installation, subject to the system's permission and confirmation prompts. Install 0.4.0 manually when upgrading from earlier versions.
+
+Download installers from this project's GitHub Releases. The Windows updater checks the package against GitHub's SHA-256 digest over HTTPS. It relies on the security of the repository's release permissions and currently has no independent publisher signature check.
 
 ## Daily use
 
@@ -171,6 +179,8 @@ The app tries DSH addresses in this order:
 4. a local port scan in `127.0.0.1:13800–13920`, validated with `session/list`.
 
 To authenticate, it reads the `client-connection/browser-session` secret from `%USERPROFILE%\.dsh\.credentials.yaml` and mints the same short-lived session cookie DSH uses for its own Web UI. The secret never leaves the machine and is not written into task data.
+
+Keep DSH bound to a loopback address such as `127.0.0.1`. Android sends prompts to the paired Windows app, which contacts DSH locally. A process on that Windows PC that takes over a candidate port and imitates the DSH API could receive prompts and the short-lived cookie. A forged reply accepted by Windows could then appear in Android's synced history as text. Start the DSH instance you trust and confirm its port before sending sensitive prompts. For an intentionally remote DSH endpoint, use HTTPS with a valid certificate.
 
 ### The dedicated session
 
@@ -257,7 +267,7 @@ Numbers change when tasks move, so DSH should re-read `GET /api/todos` before ac
 | `%APPDATA%\TodoListAgent\bridge.json` | Local bridge URL and bearer token |
 | `%APPDATA%\TodoListAgent\icon.ico` | Runtime window icon |
 
-- Data stays on the local machine.
+- Tasks, journal entries, and activity history are stored locally and copied to paired devices when LAN sync is enabled.
 - The bridge binds to loopback only.
 - Credentials are read from DSH's own local credential file and are never included in task text or journal entries.
 - The app does not capture the screen, control the keyboard, or automate the DSH UI.
