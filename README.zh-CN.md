@@ -268,7 +268,7 @@ POST /api/todos
 
 需要：
 
-- Go 1.26+
+- Go 1.26.10+
 - `rsrc`（用于嵌入 Windows 图标）
 - Windows SDK / WebView2 开发环境
 

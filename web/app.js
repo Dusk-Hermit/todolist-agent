@@ -33,10 +33,10 @@
   };
 
   const PRIORITY = {
-    pinned: { label: "长期", cls: "pinned", rank: 0 },
-    high: { label: "高", cls: "high", rank: 1 },
-    normal: { label: "中", cls: "", rank: 2 },
-    low: { label: "低", cls: "low", rank: 3 },
+    pinned: { rank: 0 },
+    high: { rank: 1 },
+    normal: { rank: 2 },
+    low: { rank: 3 },
   };
   const PRIORITY_ORDER = ["pinned", "high", "normal", "low"];
   const PRIORITY_BAND_LABEL = { pinned: "置顶 · 长期", high: "高优先级", normal: "中优先级", low: "低优先级" };
@@ -415,7 +415,6 @@
   }
 
   function subtaskRowHTML(t) {
-    const p = PRIORITY[t.priority] || PRIORITY.normal;
     const done = t.status === "done";
     const dropped = t.status === "dropped";
     const doing = t.status === "doing";
@@ -429,7 +428,6 @@
         ${t.notes ? `<div class="snotes">${esc(t.notes)}</div>` : ""}
       </div>
       <div class="smeta">
-        <span class="pri-${p.cls || "normal"}">${p.label}</span>
         <span>${esc(relTime(t.updatedAt || t.createdAt))}</span>
       </div>
       <div class="sactions">
@@ -441,7 +439,6 @@
   }
 
   function todoHTML(t) {
-    const p = PRIORITY[t.priority] || PRIORITY.normal;
     const done = t.status === "done";
     const doing = t.status === "doing";
     const dropped = t.status === "dropped";
@@ -454,7 +451,6 @@
         ? '<span class="pill dropped">已丢弃</span>'
         : "";
     const sourcePill = t.source === "agent" ? '<span class="pill agent">DSH</span>' : "";
-    const priorityPill = `<span class="pill ${p.cls}">${p.label}</span>`;
     const focusPill = focused ? '<span class="pill focus">专注</span>' : "";
     const subPill = children.length ? `<span class="pill subcount">${children.length} 子任务</span>` : "";
     const notes = t.notes ? `<div class="todo-notes">${esc(t.notes)}</div>` : "";
@@ -477,7 +473,7 @@
         <div class="todo-title" data-act="edit" title="点击编辑">${esc(t.title)}</div>
         ${notes}${reason}
         <div class="todo-meta">
-          ${priorityPill}${statusPill}${focusPill}${sourcePill}${subPill}
+          ${statusPill}${focusPill}${sourcePill}${subPill}
           <span>${esc(time)}</span>
         </div>
         ${subtasks}
@@ -493,7 +489,6 @@
   }
 
   function compactRowHTML(t, isChild) {
-    const p = PRIORITY[t.priority] || PRIORITY.normal;
     const done = t.status === "done";
     const dropped = t.status === "dropped";
     const doing = t.status === "doing";
@@ -509,7 +504,6 @@
       <div class="crow-main">
         <div class="crow-title" data-act="edit" title="${esc(t.notes || t.title)}">${esc(t.title)}</div>
         <div class="crow-meta">
-          <span class="pri-${p.cls || "normal"}">${p.label}</span>
           ${focused ? '<span class="focus-tag">专注</span>' : ""}
           ${t.source === "agent" ? '<span class="agent">DSH</span>' : ""}
           ${sub}

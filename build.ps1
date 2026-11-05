@@ -2,13 +2,13 @@
 .SYNOPSIS
   构建 TodoList Agent 单文件可执行程序与发布包。
 .DESCRIPTION
-  需要 Go 1.26+、WebView2 Runtime、rsrc。首次构建会自动安装 rsrc。
+  需要 Go 1.26.10+、WebView2 Runtime、rsrc。首次构建会自动安装 rsrc。
   产物: dist\TodoListAgent.exe, dist\TodoListAgent-win64.zip
   -Installer 额外生成 dist\TodoListAgent-Setup-win64.exe（需要 Inno Setup 6）
 #>
 [CmdletBinding()]
 param(
-  [string]$Version = "0.4.3",
+  [string]$Version = "0.4.4",
   [switch]$Installer,
   [string]$ISCC
 )
@@ -25,7 +25,7 @@ if (Test-Path $localGo) {
   $go = $localGo
 } else {
   $cmd = Get-Command go -ErrorAction SilentlyContinue
-  if (-not $cmd) { throw "未找到 Go。请安装 Go 1.26+ 并加入 PATH。" }
+  if (-not $cmd) { throw "未找到 Go。请安装 Go 1.26.10+ 并加入 PATH。" }
   $go = $cmd.Source
 }
 
@@ -37,7 +37,7 @@ Write-Host "==> Go: $(& $go version)"
 
 # --- 版本一致性检查 ---------------------------------------------------------
 # appVersion / installer / about 页面各自带着版本号；构建时先校验，避免发布
-# 一个 exe 是 0.4.3、卸载信息却还是 0.2.5 的版本。
+# 一个 exe 是 0.4.4、卸载信息却还是 0.2.5 的版本。
 $modelVersion = (Select-String -Path "models.go" -Pattern 'appVersion\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
 $installVersion = (Select-String -Path "install.ps1" -Pattern 'DisplayVersion" -Value "([^"]+)"').Matches[0].Groups[1].Value
 $webVersion = (Select-String -Path "web\index.html" -Pattern 'aboutVersion">([^<]+)<').Matches[0].Groups[1].Value

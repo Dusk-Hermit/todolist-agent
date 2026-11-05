@@ -690,25 +690,6 @@ svg {
   background: rgba(var(--ink), 0.025);
 }
 
-.pill.pinned {
-  color: #7d6f68;
-  border-color: rgba(125, 111, 104, 0.18);
-  background: rgba(125, 111, 104, 0.04);
-  font-weight: 550;
-}
-
-.pill.high {
-  color: #a9555b;
-  border-color: rgba(190, 106, 110, 0.22);
-  background: rgba(190, 106, 110, 0.07);
-}
-
-.pill.low {
-  color: #5f8069;
-  border-color: rgba(125, 155, 134, 0.18);
-  background: rgba(125, 155, 134, 0.05);
-}
-
 .pill.agent {
   color: #7d5f82;
   border-color: rgba(155, 127, 158, 0.22);
@@ -2397,14 +2378,6 @@ kbd {
   font-size: 10px;
   white-space: nowrap;
   flex: 0 0 auto;
-}
-
-.crow-meta .pri-high {
-  color: #a9555b;
-}
-
-.crow-meta .pri-low {
-  color: #5f8069;
 }
 
 .crow-meta .agent {

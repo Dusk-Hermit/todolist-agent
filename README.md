@@ -266,7 +266,7 @@ Numbers change when tasks move, so DSH should re-read `GET /api/todos` before ac
 
 Requirements:
 
-- Go 1.26+
+- Go 1.26.10+
 - `rsrc` for embedding the Windows icon
 - Windows SDK/WebView2 development environment
 
