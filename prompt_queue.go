@@ -174,7 +174,7 @@ func (a *App) batchPausedLocked() bool {
 }
 
 func (c *DSHClient) pumpQueue(ctx context.Context, selected *sessionRow, sessions []sessionRow) {
-	c.reconcileUncertain(sessions)
+	c.reconcileUncertain(ctx, sessions)
 	a := c.app
 	a.mu.Lock()
 	active := a.state.ActivePrompt
@@ -193,7 +193,7 @@ func (c *DSHClient) pumpQueue(ctx context.Context, selected *sessionRow, session
 			}
 			return
 		}
-		if response, done := queuedPromptResult(active, row); done {
+		if response, done := c.queuedResult(ctx, active, row); done {
 			c.finishQueued(active, "sent", "", response)
 		} else {
 			c.expireActivePrompt()
@@ -275,13 +275,13 @@ func (c *DSHClient) expireActivePrompt() {
 	}
 }
 
-func (c *DSHClient) reconcileUncertain(sessions []sessionRow) {
+func (c *DSHClient) reconcileUncertain(ctx context.Context, sessions []sessionRow) {
 	a := c.app
 	a.mu.Lock()
 	pending := maps.Clone(a.state.UncertainPrompts)
 	a.mu.Unlock()
 	for _, prompt := range pending {
-		if response, done := queuedPromptResult(&prompt, findSession(sessions, prompt.Session)); done {
+		if response, done := c.queuedResult(ctx, &prompt, findSession(sessions, prompt.Session)); done {
 			c.finishQueued(&prompt, "sent", "", response)
 		}
 	}

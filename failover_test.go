@@ -89,6 +89,9 @@ func TestFailoverDoesNotReplayOwnedPromptAndSyncsBackupHistory(t *testing.T) {
 	if err := client.request("POST", b.Address, "/dispatch", promptDispatch{Host: a.ID, Prompts: reserved}, &ack); err == nil {
 		t.Fatal("B accepted a stale address dispatch for A")
 	}
+	if err := client.request("POST", b.Address, "/enqueue", reserved, &ack); err == nil {
+		t.Fatal("legacy enqueue accepted work assigned to another host")
+	}
 	backup.updateMessage(ChatMessage{ID: second.ID, Text: second.Text, At: second.At, Kind: "input", Status: "sent"})
 	if _, err := backup.bindingAddTodo(TodoInput{Title: "B result"}); err != nil {
 		t.Fatal(err)
@@ -131,12 +134,12 @@ func TestInterruptedBatchResumesSyncAndReconcilesOnlyExactPrompt(t *testing.T) {
 	}
 	turn.Seq, turn.Prompt, turn.Response = 2, "another request", "other result"
 	row.Projections.Values.TurnOutline = append(row.Projections.Values.TurnOutline, turn)
-	a.dsh.reconcileUncertain([]sessionRow{row})
+	a.dsh.reconcileUncertain(t.Context(), []sessionRow{row})
 	if a.state.Messages[0].Status != "uncertain" {
 		t.Fatal("matched unrelated DSH response")
 	}
 	row.Projections.Values.TurnOutline[0].Prompt = "request\n\n<!-- todo-msg:" + id + " -->"
-	a.dsh.reconcileUncertain([]sessionRow{row})
+	a.dsh.reconcileUncertain(t.Context(), []sessionRow{row})
 	if a.state.Messages[0].Status != "sent" || len(a.state.UncertainPrompts) != 0 ||
 		a.state.Events[len(a.state.Events)-1].SourceMessageID != id {
 		t.Fatal("late exact response did not reconcile")

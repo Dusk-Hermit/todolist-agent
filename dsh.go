@@ -85,6 +85,8 @@ type DSHClient struct {
 	reqMu  sync.Mutex
 	wake   chan struct{}
 	cancel context.CancelFunc
+
+	queueHistory dshQueueHistory // accessed only by the DSH polling loop
 }
 
 func newDSHClient(a *App) *DSHClient {
