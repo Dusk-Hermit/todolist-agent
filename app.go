@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -121,6 +122,10 @@ func (a *App) snapshot() StatePayload {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	todos := append(make([]Todo, 0, len(a.state.Todos)), a.state.Todos...)
+	numbers := a.displayNumbersLocked()
+	for i := range todos {
+		todos[i].Number = numbers[todos[i].ID]
+	}
 	events := append(make([]HistoryEvent, 0, len(a.state.Events)), a.state.Events...)
 	if len(events) > 1000 {
 		events = events[len(events)-1000:]
@@ -525,6 +530,37 @@ func todoOrderLess(a, b Todo) bool {
 		return a.Position < b.Position
 	}
 	return a.CreatedAt < b.CreatedAt
+}
+
+// displayNumbersLocked mirrors the UI's root/child order: top-level tasks are
+// numbered 1,2,3…, and children become 2.4-style references. The numbers are
+// display-only and recomputed on every snapshot; they are never persisted.
+func (a *App) displayNumbersLocked() map[string]string {
+	byID := make(map[string]bool, len(a.state.Todos))
+	for _, t := range a.state.Todos {
+		byID[t.ID] = true
+	}
+	roots := make([]Todo, 0, len(a.state.Todos))
+	children := make(map[string][]Todo)
+	for _, t := range a.state.Todos {
+		if t.ParentID == "" || !byID[t.ParentID] {
+			roots = append(roots, t)
+			continue
+		}
+		children[t.ParentID] = append(children[t.ParentID], t)
+	}
+	sort.SliceStable(roots, func(i, j int) bool { return todoOrderLess(roots[i], roots[j]) })
+	numbers := make(map[string]string, len(a.state.Todos))
+	for i := range roots {
+		rootNumber := strconv.Itoa(i + 1)
+		numbers[roots[i].ID] = rootNumber
+		kids := children[roots[i].ID]
+		sort.SliceStable(kids, func(x, y int) bool { return todoOrderLess(kids[x], kids[y]) })
+		for j := range kids {
+			numbers[kids[j].ID] = rootNumber + "." + strconv.Itoa(j+1)
+		}
+	}
+	return numbers
 }
 
 // moveTodo changes priority (when dropping into another priority band) and
@@ -957,6 +993,7 @@ func (a *App) agentsBlock() string {
 		"- 一条消息有多个行动点就拆成多个任务；一个行动点不要拆碎。",
 		"- 任务支持一层子任务：`add` 时传 `parentId` 即可；子任务不能再有子任务。只有当一个任务确实有 2-5 个明确步骤时才拆子任务，不要为了层级而层级。",
 		"- 长期跟踪、需要一直排在最前面但不紧急的任务用 `priority:\"pinned\"`（置顶 · 长期）；它排在 high 之前，但视觉上不抢高优先级。",
+		"- `GET /api/todos` 返回的每个任务有 `number` 字段（如 `2.4`），它就是打钩圆圈右侧的序号；用户用序号指代时按 `number` 精确找到 id，不要按数组下标猜。序号会随排序、优先级和状态变化，操作前重新 GET。",
 		"- 先查列表再新增，避免重复；相似任务优先 update 而不是 add。",
 		"- 用户说“关掉/做完了/搞定” → `complete`；说“不做了/算了/放弃/搁置/丢弃” → `drop` 并写 `reason`；只有明确说“删除/删掉”才 `delete`。",
 		"- 开始处理某任务 → `doing`；完成后 → `done`。",

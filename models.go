@@ -2,7 +2,7 @@ package main
 
 const (
 	appName    = "TodoList Agent"
-	appVersion = "0.2.3"
+	appVersion = "0.2.4"
 	appID      = "Dusk.TodoListAgent"
 
 	statusTodo    = "todo"
@@ -31,6 +31,7 @@ type Todo struct {
 	DroppedAt       int64  `json:"droppedAt,omitempty"`
 	DropReason      string `json:"dropReason,omitempty"`
 	ParentID        string `json:"parentId,omitempty"`
+	Number          string `json:"number,omitempty"` // display-only, recomputed in snapshots
 	Position        int    `json:"position"`
 	SourceMessageID string `json:"sourceMessageId,omitempty"`
 	SourceText      string `json:"sourceText,omitempty"`

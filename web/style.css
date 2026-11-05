@@ -520,8 +520,8 @@ svg {
 .todo {
   position: relative;
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr);
-  gap: 9px;
+  grid-template-columns: 24px max-content minmax(0, 1fr);
+  gap: 8px;
   align-items: start;
   padding: 10px 11px;
   border-radius: 12px;
@@ -566,6 +566,44 @@ svg {
 
 .todo.dropped .todo-title {
   color: var(--faint);
+}
+
+.todo-num {
+  padding-top: 4px;
+  color: rgba(var(--ink), 0.55);
+  font-size: 9px;
+  font-weight: 550;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  padding-left: 1px;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.subtask-num {
+  color: rgba(var(--ink), 0.50);
+  font-size: 8px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.crow-num {
+  color: rgba(var(--ink), 0.50);
+  font-size: 8px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  white-space: nowrap;
+  user-select: none;
 }
 
 .check {
@@ -934,9 +972,9 @@ svg {
 .subtask {
   position: relative;
   display: grid;
-  grid-template-columns: 18px 1fr auto;
+  grid-template-columns: 18px max-content minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-height: 33px;
   padding: 3px 4px;
   border-radius: 7px;
@@ -2206,9 +2244,9 @@ kbd {
 .crow {
   position: relative;
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
+  grid-template-columns: 18px max-content minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-height: 34px;
   padding: 4px 7px 4px 8px;
   border-radius: 8px;

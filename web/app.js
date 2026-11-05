@@ -422,6 +422,7 @@
       <button class="scheck" data-act="toggle" aria-label="${done || dropped ? "重新打开" : "完成子任务"}" title="${done || dropped ? "重新打开" : "完成子任务"}">
         <svg class="icon"><use href="#i-check"/></svg>
       </button>
+      <span class="subtask-num">${esc(t.number || "")}</span>
       <div class="subtask-main">
         <div class="stitle" data-act="edit">${esc(t.title)}</div>
         ${t.notes ? `<div class="snotes">${esc(t.notes)}</div>` : ""}
@@ -468,6 +469,7 @@
       <button class="check" data-act="toggle" aria-label="${done ? "标记为待办" : "标记为完成"}" title="${done ? "标记为待办" : "标记为完成"}">
         <svg class="icon"><use href="#i-check"/></svg>
       </button>
+      <span class="todo-num">${esc(t.number || "")}</span>
       <div class="todo-main">
         <div class="todo-title" data-act="edit" title="点击编辑">${esc(t.title)}</div>
         ${notes}${reason}
@@ -498,6 +500,7 @@
       <button class="ccheck" data-act="toggle" aria-label="${checked ? "重新打开" : "标记完成"}" title="${checked ? "重新打开" : "标记完成"}">
         <svg class="icon"><use href="#i-check"/></svg>
       </button>
+      <span class="crow-num">${esc(t.number || "")}</span>
       <div class="crow-main">
         <div class="crow-title" data-act="edit" title="${esc(t.notes || t.title)}">${esc(t.title)}</div>
         <div class="crow-meta">
