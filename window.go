@@ -82,6 +82,7 @@ func createMainWindow(a *App) webview2.WebView {
 		"todo_deleteTodo":      a.bindingDeleteTodo,
 		"todo_setTodoStatus":   a.bindingSetTodoStatus,
 		"todo_dropTodo":        a.bindingDropTodo,
+		"todo_moveTodo":        a.bindingMoveTodo,
 		"todo_journal":         a.bindingJournal,
 		"todo_savePrefs":       a.bindingSavePrefs,
 		"todo_setAlwaysOnTop":  a.bindingSetAlwaysOnTop,
@@ -246,6 +247,14 @@ func (a *App) bindingSetTodoStatus(id, status string) (Todo, error) {
 
 func (a *App) bindingDropTodo(id, reason string) (Todo, error) {
 	return a.dropTodo(id, reason, "user")
+}
+
+func (a *App) bindingMoveTodo(id, priority, beforeID string, after bool) (map[string]any, error) {
+	t, err := a.moveTodo(id, priority, beforeID, after, "user")
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"ok": true, "todo": t}, nil
 }
 
 func (a *App) bindingJournal(beforeAt int64, limit int, query string) JournalPage {

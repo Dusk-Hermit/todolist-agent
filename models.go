@@ -2,7 +2,7 @@ package main
 
 const (
 	appName    = "TodoList Agent"
-	appVersion = "0.2.1"
+	appVersion = "0.2.2"
 	appID      = "Dusk.TodoListAgent"
 
 	statusTodo    = "todo"

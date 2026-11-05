@@ -488,6 +488,146 @@ func cloneTodoPtr(t Todo) *Todo {
 	return &c
 }
 
+func statusRank(status string) int {
+	switch normalizeStatus(status) {
+	case statusDoing:
+		return 0
+	case statusTodo:
+		return 1
+	case statusDone:
+		return 2
+	case statusDropped:
+		return 3
+	}
+	return 1
+}
+
+func priorityRank(priority string) int {
+	switch normalizePriority(priority) {
+	case priorityHigh:
+		return 0
+	case priorityLow:
+		return 2
+	}
+	return 1
+}
+
+func todoOrderLess(a, b Todo) bool {
+	if ra, rb := statusRank(a.Status), statusRank(b.Status); ra != rb {
+		return ra < rb
+	}
+	if ra, rb := priorityRank(a.Priority), priorityRank(b.Priority); ra != rb {
+		return ra < rb
+	}
+	if a.Position != b.Position {
+		return a.Position < b.Position
+	}
+	return a.CreatedAt < b.CreatedAt
+}
+
+// moveTodo changes priority (when dropping into another priority band) and
+// re-inserts the task relative to beforeID. Only siblings with the same parent
+// participate, so moving a root task never disturbs a child's position.
+func (a *App) moveTodo(id, priority, beforeID string, after bool, actor string) (Todo, error) {
+	a.mu.Lock()
+	idx := -1
+	for i := range a.state.Todos {
+		if a.state.Todos[i].ID == id {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		a.mu.Unlock()
+		return Todo{}, fmt.Errorf("任务不存在")
+	}
+	before := a.state.Todos[idx]
+	moved := before
+	if strings.TrimSpace(priority) != "" {
+		moved.Priority = normalizePriority(priority)
+	}
+	now := time.Now().UnixMilli()
+	moved.UpdatedAt = now
+
+	siblings := make([]Todo, 0, len(a.state.Todos))
+	for _, t := range a.state.Todos {
+		if t.ParentID == moved.ParentID && t.ID != moved.ID {
+			siblings = append(siblings, t)
+		}
+	}
+	sort.SliceStable(siblings, func(i, j int) bool { return todoOrderLess(siblings[i], siblings[j]) })
+
+	insert := len(siblings)
+	if beforeID != "" {
+		for i := range siblings {
+			if siblings[i].ID == beforeID {
+				insert = i
+				if after {
+					insert++
+				}
+				break
+			}
+		}
+	} else {
+		// Dropping on a priority header means "put it at the top of this band".
+		for i := range siblings {
+			if priorityRank(siblings[i].Priority) >= priorityRank(moved.Priority) {
+				insert = i
+				break
+			}
+		}
+	}
+	if insert < 0 {
+		insert = 0
+	}
+	if insert > len(siblings) {
+		insert = len(siblings)
+	}
+
+	ordered := make([]Todo, 0, len(siblings)+1)
+	ordered = append(ordered, siblings[:insert]...)
+	ordered = append(ordered, moved)
+	ordered = append(ordered, siblings[insert:]...)
+	positions := make(map[string]int, len(ordered))
+	for i := range ordered {
+		positions[ordered[i].ID] = i
+	}
+	moved.Position = positions[moved.ID]
+	for i := range a.state.Todos {
+		if p, ok := positions[a.state.Todos[i].ID]; ok {
+			a.state.Todos[i].Position = p
+		}
+	}
+	a.state.Todos[idx] = moved
+
+	detail := "调整顺序"
+	if before.Priority != moved.Priority {
+		detail = "优先级改为" + priorityLabel(moved.Priority)
+	}
+	a.appendEventLocked(HistoryEvent{
+		ID: uuid.NewString(), Kind: "todo.move", Actor: actor,
+		TodoID: moved.ID, Title: moved.Title, Detail: detail, At: now,
+		SourceMessageID: moved.SourceMessageID,
+		OriginalText:    truncateRunes(moved.SourceText, 500),
+		Before:          cloneTodoPtr(before),
+		After:           cloneTodoPtr(moved),
+	})
+	a.mu.Unlock()
+	a.markDirty()
+	a.emitState()
+	return moved, nil
+}
+
+func priorityLabel(priority string) string {
+	switch normalizePriority(priority) {
+	case priorityHigh:
+		return "高优先级"
+	case priorityLow:
+		return "低优先级"
+	}
+	return "中优先级"
+}
+
 func (a *App) updateTodo(id string, patch TodoPatch, actor string) (Todo, error) {
 	a.mu.Lock()
 	idx := -1

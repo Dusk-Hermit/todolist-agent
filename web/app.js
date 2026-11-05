@@ -27,6 +27,9 @@
     journalLoading: false,
     lastMessageTotal: -1,
     collapsedGroups: {},
+    dragId: null,
+    dropTarget: null,
+    suppressClick: false,
   };
 
   const PRIORITY = {
@@ -34,6 +37,8 @@
     normal: { label: "中", cls: "", rank: 1 },
     low: { label: "低", cls: "low", rank: 2 },
   };
+  const PRIORITY_ORDER = ["high", "normal", "low"];
+  const PRIORITY_BAND_LABEL = { high: "高优先级", normal: "中优先级", low: "低优先级" };
   const STATUS = {
     todo: { label: "待办", rank: 1 },
     doing: { label: "进行中", rank: 0 },
@@ -353,6 +358,19 @@
     });
   }
 
+  function priorityKey(t) {
+    return t && PRIORITY[t.priority] ? t.priority : "normal";
+  }
+
+  function priorityDividerHTML(key, count) {
+    const label = PRIORITY_BAND_LABEL[key] || PRIORITY_BAND_LABEL.normal;
+    return `<div class="prio-divider prio-${key}" data-priority="${key}">
+      <span class="prio-name">${label}</span>
+      <span class="prio-line"></span>
+      <span class="prio-count">${count}</span>
+    </div>`;
+  }
+
   function parentOf(t) {
     if (!t || !t.parentId) return null;
     return allTodos().find((p) => p.id === t.parentId) || null;
@@ -399,7 +417,7 @@
     const done = t.status === "done";
     const dropped = t.status === "dropped";
     const doing = t.status === "doing";
-    return `<div class="subtask ${done ? "done" : ""} ${doing ? "doing" : ""} ${dropped ? "dropped" : ""}" data-id="${esc(t.id)}">
+    return `<div class="subtask prio-${priorityKey(t)} ${done ? "done" : ""} ${doing ? "doing" : ""} ${dropped ? "dropped" : ""}" data-id="${esc(t.id)}">
       <button class="scheck" data-act="toggle" aria-label="${done || dropped ? "重新打开" : "完成子任务"}" title="${done || dropped ? "重新打开" : "完成子任务"}">
         <svg class="icon"><use href="#i-check"/></svg>
       </button>
@@ -445,7 +463,7 @@
       ${children.map(subtaskRowHTML).join("")}
       <button class="sub-add" data-act="sub-add" data-parent-id="${esc(t.id)}">+ 添加子任务</button>
     </div>` : "";
-    return `<article class="todo ${done ? "done" : ""} ${doing ? "doing" : ""} ${dropped ? "dropped" : ""}" data-id="${esc(t.id)}">
+    return `<article class="todo prio-${priorityKey(t)} ${done ? "done" : ""} ${doing ? "doing" : ""} ${dropped ? "dropped" : ""}" data-id="${esc(t.id)}" draggable="${t.status === "todo" ? "true" : "false"}">
       <button class="check" data-act="toggle" aria-label="${done ? "标记为待办" : "标记为完成"}" title="${done ? "标记为待办" : "标记为完成"}">
         <svg class="icon"><use href="#i-check"/></svg>
       </button>
@@ -475,7 +493,7 @@
     const checked = done || dropped;
     const children = isChild ? [] : childrenOf(t.id);
     const sub = children.length ? `<span>· ${children.filter((c) => c.status === "done" || c.status === "dropped").length}/${children.length}</span>` : "";
-    return `<div class="crow ${isChild ? "child" : ""} ${done ? "done" : ""} ${doing ? "doing" : ""} ${dropped ? "dropped" : ""}" data-id="${esc(t.id)}">
+    return `<div class="crow prio-${priorityKey(t)} ${isChild ? "child" : ""} ${done ? "done" : ""} ${doing ? "doing" : ""} ${dropped ? "dropped" : ""}" data-id="${esc(t.id)}" draggable="${!isChild && t.status === "todo" ? "true" : "false"}">
       <button class="ccheck" data-act="toggle" aria-label="${checked ? "重新打开" : "标记完成"}" title="${checked ? "重新打开" : "标记完成"}">
         <svg class="icon"><use href="#i-check"/></svg>
       </button>
@@ -495,6 +513,25 @@
         <button class="icon-btn del" data-act="del" title="删除" aria-label="删除"><svg class="icon"><use href="#i-trash"/></svg></button>
       </div>
     </div>`;
+  }
+
+  function cardsHTML(items) {
+    let html = "";
+    let band = "";
+    for (const t of items) {
+      if (t.status === "todo") {
+        const key = priorityKey(t);
+        if (key !== band) {
+          const count = items.filter((x) => x.status === "todo" && priorityKey(x) === key).length;
+          html += priorityDividerHTML(key, count);
+          band = key;
+        }
+      } else {
+        band = "";
+      }
+      html += todoHTML(t);
+    }
+    return html;
   }
 
   function compactGroups(items) {
@@ -522,10 +559,26 @@
     const groups = compactGroups(items);
     return groups.map((g) => {
       const collapsed = groupCollapsed(g.status);
-      const rows = g.items.map((t) => {
+      const rowFor = (t) => {
         const children = (t.status === "done" || t.status === "dropped") ? [] : childrenOf(t.id);
         return compactRowHTML(t, false) + children.map((c) => compactRowHTML(c, true)).join("");
-      }).join("");
+      };
+      let rows;
+      if (g.status === "todo") {
+        let band = "";
+        rows = g.items.map((t) => {
+          const key = priorityKey(t);
+          let prefix = "";
+          if (key !== band) {
+            const count = g.items.filter((x) => priorityKey(x) === key).length;
+            prefix = priorityDividerHTML(key, count);
+            band = key;
+          }
+          return prefix + rowFor(t);
+        }).join("");
+      } else {
+        rows = g.items.map(rowFor).join("");
+      }
       return `<section class="cgroup ${collapsed ? "collapsed" : ""}" data-group="${g.status}">
         <div class="cgroup-head" data-act="group" data-group="${g.status}">
           <svg class="icon chevron"><use href="#i-chevron"/></svg>
@@ -535,6 +588,103 @@
         <div class="cgroup-body">${rows}</div>
       </section>`;
     }).join("");
+  }
+
+  function dragHost(target) {
+    if (!target || target.closest(".subtask, .crow.child")) return null;
+    return target.closest("article.todo, .crow");
+  }
+
+  function dropTargetAt(target) {
+    const divider = target && target.closest(".prio-divider");
+    if (divider) {
+      return { kind: "divider", priority: divider.dataset.priority, el: divider };
+    }
+    const host = dragHost(target);
+    if (!host) return null;
+    const t = findTodo(host.dataset.id);
+    if (!t || t.status !== "todo") return null;
+    return { kind: "task", id: t.id, priority: priorityKey(t), el: host };
+  }
+
+  function clearDropHints() {
+    document.querySelectorAll(".drop-before, .drop-after, .drop-over").forEach((el) => {
+      el.classList.remove("drop-before", "drop-after", "drop-over");
+    });
+  }
+
+  function onDragStart(e) {
+    const host = dragHost(e.target);
+    if (!host) {
+      e.preventDefault();
+      return;
+    }
+    S.dragId = host.dataset.id;
+    S.dropTarget = null;
+    try {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", S.dragId);
+    } catch (_) {}
+    setTimeout(() => host.classList.add("dragging"), 0);
+  }
+
+  function onDragOver(e) {
+    if (!S.dragId) return;
+    const target = dropTargetAt(e.target);
+    if (!target) return;
+    if (target.kind === "task" && target.id === S.dragId) {
+      clearDropHints();
+      S.dropTarget = null;
+      return;
+    }
+    e.preventDefault();
+    try {
+      e.dataTransfer.dropEffect = "move";
+    } catch (_) {}
+    clearDropHints();
+    if (target.kind === "divider") {
+      target.el.classList.add("drop-over");
+      S.dropTarget = { kind: "divider", priority: target.priority };
+    } else {
+      const r = target.el.getBoundingClientRect();
+      const after = e.clientY > r.top + r.height / 2;
+      target.el.classList.add(after ? "drop-after" : "drop-before");
+      S.dropTarget = { kind: "task", id: target.id, priority: target.priority, after };
+    }
+  }
+
+  function onDragLeave(e) {
+    if (!S.dragId) return;
+    if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
+    clearDropHints();
+    S.dropTarget = null;
+  }
+
+  function onDragEnd() {
+    clearDropHints();
+    document.querySelectorAll(".dragging").forEach((el) => el.classList.remove("dragging"));
+    S.dragId = null;
+    S.dropTarget = null;
+  }
+
+  function onDrop(e) {
+    if (!S.dragId || !S.dropTarget) return;
+    e.preventDefault();
+    const id = S.dragId;
+    const target = S.dropTarget;
+    clearDropHints();
+    document.querySelectorAll(".dragging").forEach((el) => el.classList.remove("dragging"));
+    S.dragId = null;
+    S.dropTarget = null;
+    if (target.kind === "task" && (!target.id || target.id === id)) return;
+    S.suppressClick = true;
+    setTimeout(() => {
+      S.suppressClick = false;
+    }, 260);
+    const beforeId = target.kind === "task" ? target.id : "";
+    call("todo_moveTodo", id, target.priority, beforeId, !!target.after).catch((err) => {
+      showToast("error", errText(err));
+    });
   }
 
   function emptyCopy() {
@@ -574,7 +724,7 @@
     }
     S.lastTodosSig = sig;
     list.classList.toggle("compact", compact);
-    list.innerHTML = compact ? compactHTML(items) : items.map(todoHTML).join("");
+    list.innerHTML = compact ? compactHTML(items) : cardsHTML(items);
 
     const isEmpty = items.length === 0;
     list.classList.toggle("hidden", isEmpty);
@@ -768,6 +918,7 @@
       case "todo.add": return [e.actor === "agent" ? "agent" : "user", "i-plus"];
       case "todo.complete": return ["done", "i-check"];
       case "todo.drop": return ["", "i-drop"];
+      case "todo.move": return ["", "i-list"];
       case "todo.delete": return ["", "i-trash"];
       case "todo.update":
       case "todo.start": return [e.actor === "agent" ? "agent" : "", "i-edit"];
@@ -1302,6 +1453,7 @@
     });
 
     $("list").addEventListener("click", (e) => {
+      if (S.suppressClick) return;
       const act = e.target.closest("[data-act]");
       if (!act) return;
       if (act.dataset.act === "group") {
@@ -1324,6 +1476,13 @@
       else if (act.dataset.act === "drop") dropTodoAction(id);
       else if (act.dataset.act === "del") deleteTodo(id);
     });
+
+    const listEl = $("list");
+    listEl.addEventListener("dragstart", onDragStart);
+    listEl.addEventListener("dragover", onDragOver);
+    listEl.addEventListener("dragleave", onDragLeave);
+    listEl.addEventListener("drop", onDrop);
+    listEl.addEventListener("dragend", onDragEnd);
 
     $("taskClose").addEventListener("click", closeTaskModal);
     $("taskCancel").addEventListener("click", closeTaskModal);
