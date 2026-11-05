@@ -896,13 +896,19 @@ svg {
 }
 
 .todo.focused .todo-title {
-  color: #7f454e;
+  color: #5f8069;
+  font-weight: 700;
 }
 
 .crow.focused {
   border-color: rgba(185, 124, 136, 0.38);
   background: linear-gradient(90deg, rgba(216, 167, 174, 0.16), rgba(143, 169, 149, 0.06)), var(--surface);
   box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.crow.focused .crow-title {
+  color: #5f8069;
+  font-weight: 700;
 }
 
 .pill.focus {

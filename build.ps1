@@ -7,7 +7,7 @@
 #>
 [CmdletBinding()]
 param(
-  [string]$Version = "0.2.8"
+  [string]$Version = "0.2.9"
 )
 
 $ErrorActionPreference = "Stop"
@@ -34,7 +34,7 @@ Write-Host "==> Go: $(& $go version)"
 
 # --- 版本一致性检查 ---------------------------------------------------------
 # appVersion / installer / about 页面各自带着版本号；构建时先校验，避免发布
-# 一个 exe 是 0.2.8、卸载信息却还是 0.2.5 的版本。
+# 一个 exe 是 0.2.9、卸载信息却还是 0.2.5 的版本。
 $modelVersion = (Select-String -Path "models.go" -Pattern 'appVersion\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
 $installVersion = (Select-String -Path "install.ps1" -Pattern 'DisplayVersion" -Value "([^"]+)"').Matches[0].Groups[1].Value
 $webVersion = (Select-String -Path "web\index.html" -Pattern 'aboutVersion">([^<]+)<').Matches[0].Groups[1].Value
