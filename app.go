@@ -166,6 +166,7 @@ func (a *App) snapshot() StatePayload {
 		Messages:     messages,
 		MessageTotal: messageTotal,
 		Prefs:        prefs,
+		FocusID:      a.state.FocusID,
 		DSH:          a.status,
 		Config:       cfg,
 		Bridge:       bridge,
@@ -750,6 +751,9 @@ func (a *App) updateTodo(id string, patch TodoPatch, actor string) (Todo, error)
 	}
 	after.UpdatedAt = time.Now().UnixMilli()
 	a.state.Todos[idx] = after
+	if (after.Status == statusDone || after.Status == statusDropped) && a.state.FocusID == after.ID {
+		a.state.FocusID = ""
+	}
 	kind := "todo.update"
 	detail := "更新 " + strings.Join(changes, "、")
 	switch {
@@ -795,6 +799,40 @@ func (a *App) dropTodo(id, reason, actor string) (Todo, error) {
 	return a.updateTodo(id, patch, actor)
 }
 
+// setFocus makes one task the current focus. There is at most one globally;
+// an empty id clears focus. The focused task is intentionally not reordered.
+func (a *App) setFocus(id, actor string) (string, error) {
+	a.mu.Lock()
+	id = strings.TrimSpace(id)
+	if id != "" {
+		found := false
+		for i := range a.state.Todos {
+			if a.state.Todos[i].ID != id {
+				continue
+			}
+			found = true
+			if a.state.Todos[i].ParentID != "" {
+				a.mu.Unlock()
+				return "", fmt.Errorf("只能专注顶层任务")
+			}
+			if a.state.Todos[i].Status == statusDone || a.state.Todos[i].Status == statusDropped {
+				a.mu.Unlock()
+				return "", fmt.Errorf("只能专注未完成或未丢弃的任务")
+			}
+			break
+		}
+		if !found {
+			a.mu.Unlock()
+			return "", fmt.Errorf("任务不存在")
+		}
+	}
+	a.state.FocusID = id
+	a.mu.Unlock()
+	a.markDirty()
+	a.emitState()
+	return id, nil
+}
+
 func (a *App) deleteTodo(id, actor string) error {
 	a.mu.Lock()
 	idx := -1
@@ -810,6 +848,9 @@ func (a *App) deleteTodo(id, actor string) error {
 	}
 	before := a.state.Todos[idx]
 	now := time.Now().UnixMilli()
+	if a.state.FocusID == id {
+		a.state.FocusID = ""
+	}
 	children := make([]Todo, 0)
 	kept := make([]Todo, 0, len(a.state.Todos))
 	for _, t := range a.state.Todos {
@@ -817,6 +858,9 @@ func (a *App) deleteTodo(id, actor string) error {
 			continue
 		}
 		if t.ParentID == id {
+			if a.state.FocusID == t.ID {
+				a.state.FocusID = ""
+			}
 			children = append(children, t)
 			a.appendEventLocked(HistoryEvent{
 				ID: uuid.NewString(), Kind: "todo.delete", Actor: actor,

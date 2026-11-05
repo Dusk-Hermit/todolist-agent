@@ -444,6 +444,7 @@
     const done = t.status === "done";
     const doing = t.status === "doing";
     const dropped = t.status === "dropped";
+    const focused = !!(S.data && S.data.focusId === t.id);
     const children = (done || dropped) ? [] : childrenOf(t.id);
     const openChildren = children.filter((c) => c.status !== "done" && c.status !== "dropped").length;
     const statusPill = doing
@@ -453,6 +454,7 @@
         : "";
     const sourcePill = t.source === "agent" ? '<span class="pill agent">DSH</span>' : "";
     const priorityPill = `<span class="pill ${p.cls}">${p.label}</span>`;
+    const focusPill = focused ? '<span class="pill focus">专注</span>' : "";
     const subPill = children.length ? `<span class="pill subcount">${children.length} 子任务</span>` : "";
     const notes = t.notes ? `<div class="todo-notes">${esc(t.notes)}</div>` : "";
     const reason = dropped && t.dropReason ? `<div class="todo-notes">丢弃原因：${esc(t.dropReason)}</div>` : "";
@@ -465,7 +467,7 @@
       ${children.map(subtaskRowHTML).join("")}
       <button class="sub-add" data-act="sub-add" data-parent-id="${esc(t.id)}">+ 添加子任务</button>
     </div>` : "";
-    return `<article class="todo prio-${priorityKey(t)} ${done ? "done" : ""} ${doing ? "doing" : ""} ${dropped ? "dropped" : ""}" data-id="${esc(t.id)}" draggable="${t.status === "todo" ? "true" : "false"}">
+    return `<article class="todo prio-${priorityKey(t)} ${focused ? "focused" : ""} ${done ? "done" : ""} ${doing ? "doing" : ""} ${dropped ? "dropped" : ""}" data-id="${esc(t.id)}" draggable="${t.status === "todo" ? "true" : "false"}">
       <button class="check" data-act="toggle" aria-label="${done ? "标记为待办" : "标记为完成"}" title="${done ? "标记为待办" : "标记为完成"}">
         <svg class="icon"><use href="#i-check"/></svg>
       </button>
@@ -474,12 +476,13 @@
         <div class="todo-title" data-act="edit" title="点击编辑">${esc(t.title)}</div>
         ${notes}${reason}
         <div class="todo-meta">
-          ${priorityPill}${statusPill}${sourcePill}${subPill}
+          ${priorityPill}${statusPill}${focusPill}${sourcePill}${subPill}
           <span>${esc(time)}</span>
         </div>
         ${subtasks}
       </div>
       <div class="todo-actions">
+        ${done || dropped ? "" : `<button class="icon-btn focus ${focused ? "active" : ""}" data-act="focus" title="${focused ? "取消专注" : "专注此项"}" aria-label="${focused ? "取消专注" : "专注此项"}"><svg class="icon"><use href="#i-target"/></svg></button>`}
         <button class="icon-btn" data-act="edit" title="编辑" aria-label="编辑"><svg class="icon"><use href="#i-edit"/></svg></button>
         ${done || dropped ? "" : `<button class="icon-btn" data-act="sub-add" data-parent-id="${esc(t.id)}" title="添加子任务" aria-label="添加子任务"><svg class="icon"><use href="#i-plus"/></svg></button>`}
         ${dropped ? "" : '<button class="icon-btn" data-act="drop" title="丢弃" aria-label="丢弃"><svg class="icon"><use href="#i-drop"/></svg></button>'}
@@ -494,9 +497,10 @@
     const dropped = t.status === "dropped";
     const doing = t.status === "doing";
     const checked = done || dropped;
+    const focused = !isChild && !!(S.data && S.data.focusId === t.id);
     const children = isChild ? [] : childrenOf(t.id);
     const sub = children.length ? `<span>· ${children.filter((c) => c.status === "done" || c.status === "dropped").length}/${children.length}</span>` : "";
-    return `<div class="crow prio-${priorityKey(t)} ${isChild ? "child" : ""} ${done ? "done" : ""} ${doing ? "doing" : ""} ${dropped ? "dropped" : ""}" data-id="${esc(t.id)}" draggable="${!isChild && t.status === "todo" ? "true" : "false"}">
+    return `<div class="crow prio-${priorityKey(t)} ${focused ? "focused" : ""} ${isChild ? "child" : ""} ${done ? "done" : ""} ${doing ? "doing" : ""} ${dropped ? "dropped" : ""}" data-id="${esc(t.id)}" draggable="${!isChild && t.status === "todo" ? "true" : "false"}">
       <button class="ccheck" data-act="toggle" aria-label="${checked ? "重新打开" : "标记完成"}" title="${checked ? "重新打开" : "标记完成"}">
         <svg class="icon"><use href="#i-check"/></svg>
       </button>
@@ -505,12 +509,14 @@
         <div class="crow-title" data-act="edit" title="${esc(t.notes || t.title)}">${esc(t.title)}</div>
         <div class="crow-meta">
           <span class="pri-${p.cls || "normal"}">${p.label}</span>
+          ${focused ? '<span class="focus-tag">专注</span>' : ""}
           ${t.source === "agent" ? '<span class="agent">DSH</span>' : ""}
           ${sub}
           <span>${esc(relTime(t.updatedAt || t.createdAt))}</span>
         </div>
       </div>
       <div class="crow-actions">
+        ${isChild || done || dropped ? "" : `<button class="icon-btn focus ${focused ? "active" : ""}" data-act="focus" title="${focused ? "取消专注" : "专注此项"}" aria-label="${focused ? "取消专注" : "专注此项"}"><svg class="icon"><use href="#i-target"/></svg></button>`}
         <button class="icon-btn" data-act="edit" title="编辑" aria-label="编辑"><svg class="icon"><use href="#i-edit"/></svg></button>
         ${isChild || done || dropped ? "" : `<button class="icon-btn" data-act="sub-add" data-parent-id="${esc(t.id)}" title="添加子任务" aria-label="添加子任务"><svg class="icon"><use href="#i-plus"/></svg></button>`}
         ${dropped ? "" : '<button class="icon-btn" data-act="drop" title="丢弃" aria-label="丢弃"><svg class="icon"><use href="#i-drop"/></svg></button>'}
@@ -793,6 +799,17 @@
     try {
       await call("todo_setTodoStatus", id, next);
       showToast("success", next === "done" ? "已完成：" + clamp(t.title, 30) : "已重新打开");
+    } catch (e) {
+      showToast("error", errText(e));
+    }
+  }
+
+  async function toggleFocus(id) {
+    const current = S.data && S.data.focusId;
+    const next = current === id ? "" : id;
+    try {
+      await call("todo_setFocus", next);
+      showToast("success", next ? "已专注此项" : "已取消专注");
     } catch (e) {
       showToast("error", errText(e));
     }
@@ -1476,6 +1493,7 @@
       if (!card) return;
       const id = card.dataset.id;
       if (act.dataset.act === "toggle") toggleTodo(id);
+      else if (act.dataset.act === "focus") toggleFocus(id);
       else if (act.dataset.act === "edit") openTaskModal(id);
       else if (act.dataset.act === "drop") dropTodoAction(id);
       else if (act.dataset.act === "del") deleteTodo(id);

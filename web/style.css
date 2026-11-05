@@ -889,6 +889,39 @@ svg {
   box-shadow: inset 2px 0 0 rgba(125, 155, 134, 0.30);
 }
 
+.todo.focused {
+  border-color: rgba(185, 124, 136, 0.58);
+  background: linear-gradient(180deg, rgba(216, 167, 174, 0.16), rgba(143, 169, 149, 0.07)), var(--surface);
+  box-shadow: inset 3px 0 0 var(--accent), 0 8px 22px rgba(185, 124, 136, 0.12);
+}
+
+.todo.focused .todo-title {
+  color: #7f454e;
+}
+
+.crow.focused {
+  border-color: rgba(185, 124, 136, 0.38);
+  background: linear-gradient(90deg, rgba(216, 167, 174, 0.16), rgba(143, 169, 149, 0.06)), var(--surface);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.pill.focus {
+  color: #8a5a63;
+  border-color: rgba(185, 124, 136, 0.26);
+  background: rgba(185, 124, 136, 0.10);
+}
+
+.focus-tag {
+  color: #a9555b;
+  font-weight: 650;
+}
+
+.todo-actions .icon-btn.focus.active,
+.crow-actions .icon-btn.focus.active {
+  color: var(--accent);
+  background: rgba(185, 124, 136, 0.12);
+}
+
 .subtask.prio-pinned .stitle {
   color: var(--text-2);
   font-weight: 500;
