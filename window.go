@@ -1,0 +1,361 @@
+package main
+
+import (
+	"embed"
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	webview2 "github.com/jchv/go-webview2"
+)
+
+//go:embed web/index.html web/style.css web/app.js assets/icon.ico
+var embedded embed.FS
+
+var iconICO []byte
+
+func init() {
+	iconICO, _ = embedded.ReadFile("assets/icon.ico")
+}
+
+func buildHTML() (string, error) {
+	index, err := embedded.ReadFile("web/index.html")
+	if err != nil {
+		return "", err
+	}
+	css, err := embedded.ReadFile("web/style.css")
+	if err != nil {
+		return "", err
+	}
+	js, err := embedded.ReadFile("web/app.js")
+	if err != nil {
+		return "", err
+	}
+	html := string(index)
+	html = strings.Replace(html, "/*{{CSS}}*/", string(css), 1)
+	html = strings.Replace(html, "/*{{JS}}*/", string(js), 1)
+	return html, nil
+}
+
+func createMainWindow(a *App) webview2.WebView {
+	dir, _ := dataDir()
+	dataPath := ""
+	if dir != "" {
+		dataPath = filepath.Join(dir, "WebView2")
+		_ = os.MkdirAll(dataPath, 0o755)
+	}
+	debug := os.Getenv("TODOLIST_AGENT_DEBUG") == "1"
+	w := webview2.NewWithOptions(webview2.WebViewOptions{
+		Debug:     debug,
+		AutoFocus: true,
+		DataPath:  dataPath,
+		WindowOptions: webview2.WindowOptions{
+			Title:  appName,
+			Width:  460,
+			Height: 800,
+			Center: true,
+		},
+	})
+	if w == nil {
+		return nil
+	}
+	a.web = w
+	a.hwnd = uintptr(w.Window())
+	hideWindow(a.hwnd)
+
+	scale := windowScale(a.hwnd)
+	w.SetSize(int(460*scale), int(800*scale), webview2.HintNone)
+	w.SetSize(int(380*scale), int(600*scale), webview2.HintMin)
+	a.applySavedWindowRect()
+	a.installWindowProc()
+	a.installWindowChrome()
+
+	bindings := map[string]any{
+		"todo_ready":           a.bindingReady,
+		"todo_getState":        a.bindingGetState,
+		"todo_sendInput":       a.bindingSendInput,
+		"todo_addTodo":         a.bindingAddTodo,
+		"todo_updateTodo":      a.bindingUpdateTodo,
+		"todo_deleteTodo":      a.bindingDeleteTodo,
+		"todo_setTodoStatus":   a.bindingSetTodoStatus,
+		"todo_dropTodo":        a.bindingDropTodo,
+		"todo_journal":         a.bindingJournal,
+		"todo_savePrefs":       a.bindingSavePrefs,
+		"todo_setAlwaysOnTop":  a.bindingSetAlwaysOnTop,
+		"todo_windowAction":    a.bindingWindowAction,
+		"todo_connectDSH":      a.bindingConnectDSH,
+		"todo_refreshSessions": a.bindingRefreshSessions,
+		"todo_selectSession":   a.bindingSelectSession,
+		"todo_newSession":      a.bindingNewSession,
+		"todo_sendOnboarding":  a.bindingSendOnboarding,
+		"todo_writeAgents":     a.bindingWriteAgents,
+		"todo_diagnostics":     a.bindingDiagnostics,
+		"todo_quit":            a.bindingQuit,
+	}
+	for name, fn := range bindings {
+		if err := w.Bind(name, fn); err != nil {
+			log.Printf("bind %s: %v", name, err)
+		}
+	}
+	html, err := buildHTML()
+	if err != nil {
+		log.Printf("build html: %v", err)
+		html = "<html><body style='background:#0b0d12;color:#fff;font-family:sans-serif;padding:32px'>UI assets missing.</body></html>"
+	}
+	w.SetHtml(html)
+	// Safety net: if the page never reports ready, still show the window.
+	time.AfterFunc(4*time.Second, func() {
+		a.mu.Lock()
+		ready := a.pageReady
+		hidden := a.startHidden
+		a.mu.Unlock()
+		if !ready && !hidden {
+			a.showMainWindow()
+		}
+	})
+	return w
+}
+
+func (a *App) installWindowChrome() {
+	if a.hwnd == 0 {
+		return
+	}
+	setAppUserModelID(appID)
+	setWindowTitle(a.hwnd, appName)
+	setWindowIcon(a.hwnd, a.iconPath)
+	setLightTitleBar(a.hwnd)
+	a.mu.Lock()
+	onTop := a.state.Prefs.AlwaysOnTop
+	a.mu.Unlock()
+	applyTopMost(a.hwnd, onTop)
+}
+
+func (a *App) showMainWindow() {
+	if a.hwnd == 0 {
+		return
+	}
+	showAndFocus(a.hwnd)
+}
+
+func (a *App) hideMainWindow() {
+	if a.hwnd == 0 {
+		return
+	}
+	a.saveWindowState()
+	hideWindow(a.hwnd)
+}
+
+func (a *App) setAlwaysOnTop(on bool) {
+	a.mu.Lock()
+	a.state.Prefs.AlwaysOnTop = on
+	a.mu.Unlock()
+	if a.hwnd != 0 {
+		applyTopMost(a.hwnd, on)
+	}
+	a.markDirty()
+	if a.tray != nil {
+		a.tray.setPin(on)
+	}
+	a.emitState()
+}
+
+func (a *App) toggleAlwaysOnTop() bool {
+	a.mu.Lock()
+	on := !a.state.Prefs.AlwaysOnTop
+	a.mu.Unlock()
+	a.setAlwaysOnTop(on)
+	return on
+}
+
+func (a *App) quitApp() {
+	a.mu.Lock()
+	if a.quitting {
+		a.mu.Unlock()
+		return
+	}
+	a.quitting = true
+	a.mu.Unlock()
+	a.saveWindowState()
+	a.saveNow()
+	if a.web != nil {
+		w := a.web
+		w.Dispatch(func() {
+			a.restoreWindowProc()
+			w.Destroy()
+		})
+	}
+	if a.tray != nil {
+		a.tray.quit()
+	}
+}
+
+// ---- bindings -------------------------------------------------------------
+
+func (a *App) bindingReady() (StatePayload, error) {
+	a.mu.Lock()
+	a.pageReady = true
+	hidden := a.startHidden
+	a.mu.Unlock()
+	if !hidden {
+		a.showMainWindow()
+	}
+	// Let the first paint settle before revealing the window.
+	time.AfterFunc(120*time.Millisecond, func() {
+		a.emitState()
+		a.emitStatus()
+	})
+	return a.snapshot(), nil
+}
+
+func (a *App) bindingGetState() StatePayload {
+	return a.snapshot()
+}
+
+func (a *App) bindingSendInput(text string) (map[string]any, error) {
+	if a.dsh == nil {
+		return nil, fmt.Errorf("DSH 客户端尚未启动")
+	}
+	id, err := a.dsh.SendPrompt(text, false)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"ok": true, "id": id}, nil
+}
+
+func (a *App) bindingAddTodo(in TodoInput) (Todo, error) {
+	return a.addTodo(in, "user", "user")
+}
+
+func (a *App) bindingUpdateTodo(id string, patch TodoPatch) (Todo, error) {
+	return a.updateTodo(id, patch, "user")
+}
+
+func (a *App) bindingDeleteTodo(id string) (map[string]any, error) {
+	if err := a.deleteTodo(id, "user"); err != nil {
+		return nil, err
+	}
+	return map[string]any{"ok": true}, nil
+}
+
+func (a *App) bindingSetTodoStatus(id, status string) (Todo, error) {
+	return a.setTodoStatus(id, status, "user")
+}
+
+func (a *App) bindingDropTodo(id, reason string) (Todo, error) {
+	return a.dropTodo(id, reason, "user")
+}
+
+func (a *App) bindingJournal(beforeAt int64, limit int, query string) JournalPage {
+	return a.journalPage(beforeAt, limit, query)
+}
+
+func (a *App) bindingSavePrefs(p Prefs) map[string]any {
+	a.setPrefs(p)
+	if a.hwnd != 0 {
+		a.mu.Lock()
+		on := a.state.Prefs.AlwaysOnTop
+		a.mu.Unlock()
+		applyTopMost(a.hwnd, on)
+		if a.tray != nil {
+			a.tray.setPin(on)
+		}
+	}
+	a.emitState()
+	return map[string]any{"ok": true}
+}
+
+func (a *App) bindingSetAlwaysOnTop(on bool) map[string]any {
+	a.setAlwaysOnTop(on)
+	return map[string]any{"ok": true, "alwaysOnTop": on}
+}
+
+func (a *App) bindingWindowAction(action string) map[string]any {
+	switch action {
+	case "minimize":
+		if a.hwnd != 0 {
+			showWindow(a.hwnd, swMinimize)
+		}
+	case "hide", "close":
+		a.hideMainWindow()
+	case "show":
+		a.showMainWindow()
+	case "quit":
+		a.quitApp()
+	}
+	return map[string]any{"ok": true}
+}
+
+func (a *App) bindingConnectDSH(baseURL, sessionID string) map[string]any {
+	if a.dsh == nil {
+		return map[string]any{"ok": false, "error": "DSH 客户端尚未启动"}
+	}
+	a.dsh.Reconfigure(baseURL, sessionID)
+	return map[string]any{"ok": true}
+}
+
+func (a *App) bindingRefreshSessions() []SessionOption {
+	if a.dsh != nil {
+		a.dsh.Wake()
+	}
+	return a.getSessions()
+}
+
+func (a *App) bindingSelectSession(id string) map[string]any {
+	if a.dsh == nil {
+		return map[string]any{"ok": false, "error": "DSH 客户端尚未启动"}
+	}
+	a.dsh.SelectSession(id)
+	return map[string]any{"ok": true}
+}
+
+func (a *App) bindingNewSession() map[string]any {
+	if a.dsh == nil {
+		return map[string]any{"ok": false, "error": "DSH 客户端尚未启动"}
+	}
+	a.dsh.NewDedicatedSession()
+	return map[string]any{"ok": true}
+}
+
+func (a *App) bindingSendOnboarding() (map[string]any, error) {
+	if a.dsh == nil {
+		return nil, fmt.Errorf("DSH 客户端尚未启动")
+	}
+	text := a.dsh.OnboardingText()
+	id, err := a.dsh.SendPrompt(text, true)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"ok": true, "id": id}, nil
+}
+
+func (a *App) bindingWriteAgents() map[string]any {
+	path, err := a.writeAgentsBlock()
+	if err != nil {
+		return map[string]any{"ok": false, "error": err.Error()}
+	}
+	a.toast("success", "已写入 "+path)
+	return map[string]any{"ok": true, "path": path}
+}
+
+func (a *App) bindingDiagnostics() string {
+	snap := a.snapshot()
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s %s\n", appName, appVersion)
+	fmt.Fprintf(&b, "data: %s\n", snap.DataPath)
+	fmt.Fprintf(&b, "dsh: connected=%v base=%s session=%s\n", snap.DSH.Connected, snap.DSH.BaseURL, snap.DSH.SessionID)
+	fmt.Fprintf(&b, "dsh title: %s\n", snap.DSH.SessionTitle)
+	fmt.Fprintf(&b, "dsh cwd: %s\n", snap.DSH.CWD)
+	fmt.Fprintf(&b, "dsh error: %s\n", snap.DSH.Error)
+	fmt.Fprintf(&b, "bridge: %s\n", snap.Bridge.URL)
+	fmt.Fprintf(&b, "bridge config: %s\n", snap.Bridge.ConfigPath)
+	fmt.Fprintf(&b, "todos: %d, events: %d, messages: %d\n", len(snap.Todos), len(snap.Events), len(snap.Messages))
+	return b.String()
+}
+
+func (a *App) bindingQuit() map[string]any {
+	a.quitApp()
+	return map[string]any{"ok": true}
+}

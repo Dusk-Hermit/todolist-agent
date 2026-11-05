@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>TodoList Agent</title>
+<style>/*{{CSS}}*/</style>
+</head>
+<body>
+<svg class="sprite" aria-hidden="true">
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M9 4h6l-.9 6.2 2.9 2.9V15H7v-1.9l2.9-2.9L9 4Z"/><path d="M12 15v5"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5.2l3.2 2"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13.5a7.8 7.8 0 0 0 0-3l2-1.6-2-3.4-2.4 1a7.7 7.7 0 0 0-2.6-1.5L14 2.5h-4L9.6 5a7.7 7.7 0 0 0-2.6 1.5l-2.4-1-2 3.4 2 1.6a7.8 7.8 0 0 0 0 3l-2 1.6 2 3.4 2.4-1a7.7 7.7 0 0 0 2.6 1.5l.4 2.5h4l.4-2.5a7.7 7.7 0 0 0 2.6-1.5l2.4 1 2-3.4-2-1.6Z"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M4 12 20 4l-4.5 16-4-6.5L4 12Z"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.2 4.2L19 7"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4.8h6V7m-8.5 0 .8 13h9.4l.8-13M10 11v5.5M14 11v5.5"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L20 8l-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6.7M20 5v6h-6"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 5H6a2 2 0 0 0-2 2v9"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3.5c.6 3.9 2.6 5.9 6.5 6.5-3.9.6-5.9 2.6-6.5 6.5-.6-3.9-2.6-5.9-6.5-6.5 3.9-.6 5.9-2.6 6.5-6.5Z"/><path d="M18.5 16.5c.3 1.7 1.2 2.7 3 3-1.8.3-2.7 1.3-3 3-.3-1.7-1.2-2.7-3-3 1.8-.3 2.7-1.3 3-3Z"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2Z"/></symbol>
+  <symbol id="i-dot" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21.5v-16Z"/><path d="M4 18.5A2.5 2.5 0 0 1 6.5 16H20"/></symbol>
+  <symbol id="i-drop" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4.8h6V7m-8.5 0 .8 13h9.4l.8-13"/><path d="m9.5 11 5 5M14.5 11l-5 5"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+</svg>
+
+<div class="app" id="app">
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">
+        <svg viewBox="0 0 40 40" aria-hidden="true">
+          <defs>
+            <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#e2b1b6"/><stop offset=".55" stop-color="#c08896"/><stop offset="1" stop-color="#8fa995"/>
+            </linearGradient>
+          </defs>
+          <rect x="1" y="1" width="38" height="38" rx="12" fill="url(#lg)"/>
+          <path d="m11 21 6.2 6.2L29.5 14" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="30.5" cy="9.5" r="1.9" fill="#fff"/>
+        </svg>
+      </div>
+      <div class="brand-copy">
+        <div class="brand-title">清单 <span class="brand-badge">DSH</span></div>
+        <div class="brand-sub" id="brandSub">正在查找本地会话…</div>
+      </div>
+    </div>
+    <div class="top-actions">
+      <button class="icon-btn" id="pinBtn" title="窗口置顶" aria-label="窗口置顶" aria-pressed="false">
+        <svg class="icon"><use href="#i-pin"/></svg>
+      </button>
+      <button class="icon-btn" id="journalBtn" title="想法回顾" aria-label="想法回顾">
+        <svg class="icon"><use href="#i-book"/></svg>
+      </button>
+      <button class="icon-btn" id="historyBtn" title="操作记录" aria-label="操作记录">
+        <svg class="icon"><use href="#i-clock"/></svg>
+      </button>
+      <button class="icon-btn" id="settingsBtn" title="设置" aria-label="设置">
+        <svg class="icon"><use href="#i-gear"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <section class="status-card" id="statusCard" data-state="connecting">
+    <div class="status-orb"><span></span></div>
+    <div class="status-copy">
+      <div class="status-title" id="statusTitle">正在连接 DSH…</div>
+      <div class="status-sub" id="statusSub">读取本地会话</div>
+    </div>
+    <div class="status-side">
+      <span class="mini-stat" id="statusStat">—</span>
+    </div>
+  </section>
+
+  <section class="running hidden" id="running">
+    <div class="running-left">
+      <div class="spinner"><span></span></div>
+      <div class="running-copy">
+        <div class="running-title">DSH 正在处理</div>
+        <div class="running-sub" id="runningSub">…</div>
+      </div>
+    </div>
+    <div class="running-time" id="runningTime">00:00</div>
+  </section>
+
+  <section class="toolbar">
+    <div class="filters" id="filters">
+      <button class="filter active" data-filter="all">全部 <b id="countAll">0</b></button>
+      <button class="filter" data-filter="open">待办 <b id="countOpen">0</b></button>
+      <button class="filter" data-filter="doing">进行中 <b id="countDoing">0</b></button>
+      <button class="filter" data-filter="done">完成 <b id="countDone">0</b></button>
+      <button class="filter" data-filter="dropped">丢弃 <b id="countDropped">0</b></button>
+    </div>
+    <button class="view-btn" id="viewBtn" title="切换紧凑模式" aria-label="切换紧凑模式" aria-pressed="false">
+      <svg class="icon" id="viewIcon"><use href="#i-list"/></svg>
+    </button>
+    <button class="add-btn" id="addBtn" title="新建任务 (Ctrl+N)" aria-label="新建任务">
+      <svg class="icon"><use href="#i-plus"/></svg>
+    </button>
+  </section>
+
+  <main class="list" id="list" aria-live="polite"></main>
+
+  <section class="empty hidden" id="empty">
+    <div class="empty-art">
+      <svg viewBox="0 0 120 120" aria-hidden="true">
+        <circle cx="60" cy="60" r="46" fill="none" stroke="currentColor" stroke-opacity=".10" stroke-width="1.5" stroke-dasharray="4 7"/>
+        <circle cx="60" cy="60" r="33" fill="none" stroke="currentColor" stroke-opacity=".06" stroke-width="1"/>
+        <path d="m42 61 12 12 25-28" fill="none" stroke="currentColor" stroke-opacity=".42" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="88" cy="30" r="3.2" fill="currentColor" fill-opacity=".45"/>
+      </svg>
+    </div>
+    <div class="empty-title" id="emptyTitle">清单还是空的</div>
+    <div class="empty-sub" id="emptySub">在下面写下想法，DSH 会把它变成可执行的任务。</div>
+    <button class="ghost-btn" id="emptyAdd">手动添加第一个任务</button>
+  </section>
+
+  <section class="setup hidden" id="setupBanner">
+    <div class="setup-icon"><svg class="icon"><use href="#i-spark"/></svg></div>
+    <div class="setup-copy">
+      <b>让 DSH 维护这份清单</b>
+      <span>发送一次接入说明，之后它会自动拆分、更新和完成任务。</span>
+    </div>
+    <button class="primary-btn small" id="setupBtn">启用</button>
+    <button class="icon-btn subtle" id="setupDismiss" aria-label="稍后">
+      <svg class="icon"><use href="#i-close"/></svg>
+    </button>
+  </section>
+
+  <section class="composer-wrap">
+    <div class="composer" id="composer">
+      <textarea id="input" rows="1" placeholder="把一个想法丢给 DSH…" spellcheck="false"></textarea>
+      <div class="composer-bar">
+        <div class="composer-hint" id="composerHint">Enter 发送 · Shift+Enter 换行</div>
+        <button class="send-btn" id="sendBtn" title="发送到 DSH (Enter)" aria-label="发送到 DSH">
+          <svg class="icon"><use href="#i-send"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="composer-meta">
+      <button class="session-chip" id="sessionChip" title="切换会话">正在连接…</button>
+      <span class="send-state" id="sendState"></span>
+    </div>
+  </section>
+</div>
+
+<div class="scrim hidden" id="scrim"></div>
+
+<aside class="side-panel" id="historyPanel" aria-hidden="true">
+  <header class="panel-head">
+    <div>
+      <div class="panel-kicker" id="panelKicker">Review</div>
+      <h2 id="panelTitle">想法回顾</h2>
+    </div>
+    <button class="icon-btn" id="historyClose" aria-label="关闭">
+      <svg class="icon"><use href="#i-close"/></svg>
+    </button>
+  </header>
+  <div class="panel-tabs" id="panelTabs">
+    <button class="panel-tab active" data-panel="journal">想法</button>
+    <button class="panel-tab" data-panel="history">操作</button>
+  </div>
+
+  <div class="journal-view" id="journalView">
+    <div class="journal-search">
+      <svg class="icon"><use href="#i-search"/></svg>
+      <input id="journalSearch" placeholder="搜索很久以前的想法、任务…" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="journal-summary" id="journalSummary">—</div>
+    <div class="journal-list" id="journalList"></div>
+    <button class="ghost-btn journal-more hidden" id="journalMore">加载更早</button>
+  </div>
+
+  <div class="history-view hidden" id="historyView">
+    <div class="panel-filter">
+      <span id="historySummary">—</span>
+      <button class="link-btn" id="historyScrollTop">回到最新</button>
+    </div>
+    <div class="history" id="historyList"></div>
+  </div>
+</aside>
+
+<div class="modal-layer hidden" id="taskLayer">
+  <div class="modal task-modal" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle">
+    <header class="modal-head">
+      <div>
+        <div class="panel-kicker">Task</div>
+        <h2 id="taskModalTitle">新建任务</h2>
+      </div>
+      <button class="icon-btn" id="taskClose" aria-label="关闭">
+        <svg class="icon"><use href="#i-close"/></svg>
+      </button>
+    </header>
+    <div class="modal-body">
+      <label class="field">
+        <span>标题</span>
+        <input id="taskTitle" maxlength="500" placeholder="想完成什么？" autocomplete="off">
+      </label>
+      <label class="field">
+        <span>备注</span>
+        <textarea id="taskNotes" rows="3" maxlength="2000" placeholder="补充上下文、验收标准…"></textarea>
+      </label>
+      <div class="field-row">
+        <label class="field">
+          <span>优先级</span>
+          <select id="taskPriority">
+            <option value="high">高</option>
+            <option value="normal" selected>中</option>
+            <option value="low">低</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>状态</span>
+          <select id="taskStatus">
+            <option value="todo">待办</option>
+            <option value="doing">进行中</option>
+            <option value="done">已完成</option>
+            <option value="dropped">已丢弃</option>
+          </select>
+        </label>
+      </div>
+      <label class="field hidden" id="taskDropReasonField">
+        <span>丢弃原因</span>
+        <input id="taskDropReason" maxlength="500" placeholder="为什么不做 / 搁置？">
+      </label>
+      <div class="source-box hidden" id="taskSourceBox">
+        <div class="source-head">来源想法 <time id="taskSourceTime"></time></div>
+        <div class="source-text" id="taskSourceText"></div>
+      </div>
+      <p class="field-hint" id="taskHint">任务会保存在本地；如果已接入 DSH，也可以让 DSH 来维护它。</p>
+    </div>
+    <footer class="modal-foot">
+      <button class="danger-btn hidden" id="taskDrop">
+        <svg class="icon"><use href="#i-drop"/></svg> 丢弃
+      </button>
+      <button class="danger-btn hidden" id="taskDelete">
+        <svg class="icon"><use href="#i-trash"/></svg> 删除
+      </button>
+      <div class="spacer"></div>
+      <button class="ghost-btn" id="taskCancel">取消</button>
+      <button class="primary-btn" id="taskSave">保存任务</button>
+    </footer>
+  </div>
+</div>
+
+<div class="modal-layer hidden" id="settingsLayer">
+  <div class="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <header class="modal-head">
+      <div>
+        <div class="panel-kicker">Settings</div>
+        <h2 id="settingsTitle">设置</h2>
+      </div>
+      <button class="icon-btn" id="settingsClose" aria-label="关闭">
+        <svg class="icon"><use href="#i-close"/></svg>
+      </button>
+    </header>
+    <div class="modal-body settings-body">
+
+      <section class="settings-section">
+        <div class="section-title"><span class="section-index">01</span> 连接 DeepSeek Harness</div>
+        <div class="kv-status" id="connStatus">
+          <span class="dot"></span><span id="connStatusText">正在连接…</span>
+        </div>
+        <label class="field">
+          <span>DSH 地址</span>
+          <input id="baseUrlInput" placeholder="自动检测，例如 http://127.0.0.1:13848" autocomplete="off" spellcheck="false">
+        </label>
+        <div class="field">
+          <span>目标会话</span>
+          <div class="select-row">
+            <select id="sessionSelect"></select>
+            <button class="icon-btn" id="refreshSessions" title="刷新会话列表" aria-label="刷新会话列表">
+              <svg class="icon"><use href="#i-refresh"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="button-row">
+          <button class="primary-btn" id="connectBtn">重新连接</button>
+          <button class="ghost-btn" id="newSessionBtn">新建专用会话</button>
+          <button class="ghost-btn" id="onboardBtn"><svg class="icon"><use href="#i-spark"/></svg> 让 DSH 管理清单</button>
+        </div>
+        <label class="toggle-row">
+          <input type="checkbox" id="writeAgents">
+          <span class="toggle"></span>
+          <span class="toggle-copy"><b>写入工作区 AGENTS.local.md</b><small>让 DSH 在长会话/压缩后仍记得任务接口</small></span>
+        </label>
+        <p class="field-hint" id="connHint">应用会读取 DSH 的本地签名密钥，直接调用当前会话的输入接口，不会另开进程。</p>
+      </section>
+
+      <section class="settings-section">
+        <div class="section-title"><span class="section-index">02</span> 窗口行为</div>
+        <label class="toggle-row">
+          <input type="checkbox" id="alwaysOnTop">
+          <span class="toggle"></span>
+          <span class="toggle-copy"><b>窗口置顶</b><small>清单保持在其他窗口之上</small></span>
+        </label>
+        <label class="toggle-row">
+          <input type="checkbox" id="compactPref">
+          <span class="toggle"></span>
+          <span class="toggle-copy"><b>紧凑列表</b><small>一行一个任务，适合积累很多条目后快速浏览</small></span>
+        </label>
+        <div class="shortcut-grid">
+          <div><kbd>Enter</kbd><span>发送</span></div>
+          <div><kbd>Shift</kbd><kbd>Enter</kbd><span>换行</span></div>
+          <div><kbd>Ctrl</kbd><kbd>N</kbd><span>新建任务</span></div>
+          <div><kbd>Esc</kbd><span>关闭弹层</span></div>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <div class="section-title"><span class="section-index">03</span> Agent 任务接口</div>
+        <p class="field-hint">DSH 通过这个本地接口读写清单。接口只监听 127.0.0.1，并使用随机 token 鉴权。</p>
+        <div class="copy-row">
+          <div class="copy-value"><span>地址</span><code id="bridgeUrl">—</code></div>
+          <button class="icon-btn" id="copyBridgeUrl" title="复制地址" aria-label="复制地址"><svg class="icon"><use href="#i-copy"/></svg></button>
+        </div>
+        <div class="copy-row">
+          <div class="copy-value"><span>Token</span><code id="bridgeToken">—</code></div>
+          <button class="icon-btn" id="toggleToken" title="显示 / 隐藏" aria-label="显示或隐藏 Token"><svg class="icon"><use href="#i-bolt"/></svg></button>
+          <button class="icon-btn" id="copyBridgeToken" title="复制 Token" aria-label="复制 Token"><svg class="icon"><use href="#i-copy"/></svg></button>
+        </div>
+        <div class="copy-row">
+          <div class="copy-value"><span>bridge.json</span><code id="bridgeConfig">—</code></div>
+          <button class="icon-btn" id="copyBridgeConfig" title="复制路径" aria-label="复制路径"><svg class="icon"><use href="#i-copy"/></svg></button>
+        </div>
+        <label class="field">
+          <span>curl 示例</span>
+          <pre class="code-block" id="curlExample">—</pre>
+        </label>
+        <button class="ghost-btn" id="copyCurl"><svg class="icon"><use href="#i-copy"/></svg> 复制 curl 示例</button>
+      </section>
+
+      <section class="settings-section">
+        <div class="section-title"><span class="section-index">04</span> 数据</div>
+        <div class="meta-grid">
+          <div><span>任务</span><b id="metaTodos">0</b></div>
+          <div><span>操作记录</span><b id="metaEvents">0</b></div>
+          <div><span>输入</span><b id="metaMessages">0</b></div>
+        </div>
+        <div class="copy-row">
+          <div class="copy-value"><span>数据文件</span><code id="dataPath">—</code></div>
+          <button class="icon-btn" id="copyDataPath" title="复制路径" aria-label="复制路径"><svg class="icon"><use href="#i-copy"/></svg></button>
+        </div>
+        <div class="button-row">
+          <button class="ghost-btn" id="diagnosticsBtn">复制诊断信息</button>
+          <button class="ghost-btn danger-text" id="quitBtn">退出应用</button>
+        </div>
+      </section>
+
+      <section class="settings-section about">
+        <div class="section-title"><span class="section-index">05</span> 关于</div>
+        <p><b>TodoList Agent <span id="aboutVersion">0.2.0</span></b><br>
+        用 Go + WebView2 构建的轻量桌面清单。通过 DSH 的本地 Web API 直接向当前会话发送输入，并把 DSH 的工具调用同步回清单。</p>
+        <p class="muted">连接原理：读取 <code>%USERPROFILE%\.dsh\.credentials.yaml</code> 中的本地签名密钥，签发一个仅限 127.0.0.1 的会话 Cookie；输入通过 <code>session/prompt</code> 进入当前会话。</p>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<div class="toast-root" id="toastRoot"></div>
+
+<script>/*{{JS}}*/</script>
+</body>
+</html>
