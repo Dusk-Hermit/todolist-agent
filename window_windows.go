@@ -33,7 +33,9 @@ func createMainWindow(a *App) webview2.WebView {
 	if w == nil {
 		return nil
 	}
+	a.mu.Lock()
 	a.web = w
+	a.mu.Unlock()
 	a.hwnd = uintptr(w.Window())
 	hideWindow(a.hwnd)
 

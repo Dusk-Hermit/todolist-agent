@@ -61,6 +61,7 @@ func main() {
 	}
 	startTray(app)
 	w.Run()
+	log.Printf("main window message loop exited")
 }
 
 func initLogging() {
@@ -77,6 +78,9 @@ func initLogging() {
 		return
 	}
 	log.SetOutput(f)
+	if err := debug.SetCrashOutput(f, debug.CrashOptions{}); err != nil {
+		log.Printf("capture runtime crashes: %v", err)
+	}
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	log.Printf("---- %s %s starting (pid %d) ----", appName, appVersion, os.Getpid())
 }
