@@ -3,10 +3,12 @@ package main
 import (
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -28,6 +30,28 @@ func TestSelectUpdateUsesNewestCompatibleAsset(t *testing.T) {
 	}
 	if selectUpdate(releases, "0.10.0", apk) != nil || selectUpdate(releases, "0.1.0", "TodoListAgent-Setup-win64.exe") != nil {
 		t.Fatal("selected an equal, older, or incompatible release")
+	}
+}
+
+type updateTransport func(*http.Request) (*http.Response, error)
+
+func (f updateTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
+func TestDownloadPrefersGitHubAssetAPI(t *testing.T) {
+	const payload = "release payload"
+	client := &http.Client{Transport: updateTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host != "api.github.com" || r.URL.Path != "/repos/"+updateRepo+"/releases/assets/42" ||
+			r.Header.Get("Accept") != "application/octet-stream" {
+			t.Fatalf("unexpected download request: %s", r.URL)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(payload))}, nil
+	})}
+	asset := releaseAsset{ID: 42, Size: int64(len(payload)),
+		Digest: fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(payload)))}
+	if err := downloadUpdate(t.Context(), client, asset, filepath.Join(t.TempDir(), "update.apk")); err != nil {
+		t.Fatal(err)
 	}
 }
 

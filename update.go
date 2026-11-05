@@ -28,6 +28,7 @@ type githubRelease struct {
 }
 
 type releaseAsset struct {
+	ID     int64  `json:"id"`
 	Name   string `json:"name"`
 	URL    string `json:"browser_download_url"`
 	Digest string `json:"digest"`
@@ -114,7 +115,7 @@ func updateClient() *http.Client {
 			return fmt.Errorf("更新下载重定向无效")
 		}
 		switch r.URL.Host {
-		case "github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com":
+		case "api.github.com", "github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com":
 			return nil
 		default:
 			return fmt.Errorf("更新下载重定向到了未知主机")
@@ -142,6 +143,23 @@ func githubUpdates(ctx context.Context, client *http.Client) ([]githubRelease, e
 }
 
 func downloadUpdate(ctx context.Context, client *http.Client, asset releaseAsset, destination string) error {
+	if asset.ID > 0 {
+		apiURL := "https://api.github.com/repos/" + updateRepo + "/releases/assets/" + strconv.FormatInt(asset.ID, 10)
+		attempt, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		err := downloadUpdateFrom(attempt, client, asset, apiURL, destination)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		// Public release links are a fallback if the API is rate-limited.
+		if ctx.Err() != nil {
+			return err
+		}
+	}
+	return downloadUpdateFrom(ctx, client, asset, asset.URL, destination)
+}
+
+func downloadUpdateFrom(ctx context.Context, client *http.Client, asset releaseAsset, source, destination string) error {
 	expected, err := assetHash(asset.Digest)
 	if err != nil {
 		return err
@@ -149,10 +167,11 @@ func downloadUpdate(ctx context.Context, client *http.Client, asset releaseAsset
 	if asset.Size <= 0 || asset.Size > maxUpdateSize {
 		return fmt.Errorf("更新文件大小无效")
 	}
-	r, err := http.NewRequestWithContext(ctx, "GET", asset.URL, nil)
+	r, err := http.NewRequestWithContext(ctx, "GET", source, nil)
 	if err != nil {
 		return err
 	}
+	r.Header.Set("Accept", "application/octet-stream")
 	response, err := client.Do(r)
 	if err != nil {
 		return err
