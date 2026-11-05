@@ -29,6 +29,12 @@ const lanPort = 17891
 const lanBodyLimit = 32 << 20
 const lanPrefix = "/todolist/v1"
 
+var (
+	errLANPeerUnreachable = errors.New("暂时无法连接已发现的设备。请在对端打开 TodoList 并点刷新。")
+	errLANPeerPulling     = errors.New("已收到对端的同步请求。可在对端查看同步结果。")
+	errLANBatchQueued     = errors.New("已收到待发消息，等待电脑重新连接 DSH。")
+)
+
 type lanInfo struct {
 	ID       string    `json:"id"`
 	Name     string    `json:"name"`
@@ -61,6 +67,7 @@ type lanService struct {
 	refreshMu  sync.Mutex
 	syncedHost string // only accessed while refreshMu is held
 	mu         sync.Mutex
+	lastPull   time.Time
 	peers      []lanPeer
 	discovered map[string]lanSighting
 	wake       chan struct{}
@@ -253,6 +260,11 @@ func (s *lanService) handleSync(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusLocked)
 		return
 	}
+	if known.Device != "" && known.Device != s.id {
+		s.mu.Lock()
+		s.lastPull = time.Now()
+		s.mu.Unlock()
+	}
 	writeJSON(w, http.StatusOK, snapshot.delta(known))
 }
 
@@ -356,7 +368,7 @@ func (s *lanService) probePeers(addresses map[string]bool) ([]lanPeer, error) {
 	var workers sync.WaitGroup
 	for i, addr := range addrs {
 		workers.Go(func() {
-			ctx, cancel := context.WithTimeout(s.ctx, 1500*time.Millisecond)
+			ctx, cancel := context.WithTimeout(s.ctx, 3*time.Second)
 			defer cancel()
 			results[i].err = s.requestContext(ctx, "GET", addr, "/info", nil, &results[i].info)
 		})
@@ -364,10 +376,10 @@ func (s *lanService) probePeers(addresses map[string]bool) ([]lanPeer, error) {
 	workers.Wait()
 	peers := make([]lanPeer, 0, len(addrs))
 	seen := make(map[string]bool)
-	var probeErr error
+	var failed bool
 	for i, res := range results {
 		if res.err != nil {
-			probeErr = res.err
+			failed = true
 			continue
 		}
 		info := res.info
@@ -380,7 +392,10 @@ func (s *lanService) probePeers(addresses map[string]bool) ([]lanPeer, error) {
 			Address: addr, DSH: info.DSH, Paused: info.Paused, Dispatch: info.Dispatch,
 			DSHAddress: peerDSHAddress(addr, info.DSH.BaseURL)})
 	}
-	return peers, probeErr
+	if failed && len(peers) == 0 {
+		return peers, errLANPeerUnreachable
+	}
+	return peers, nil
 }
 
 func (s *lanService) exchange(peer lanPeer) error {
@@ -470,6 +485,24 @@ func (s *lanService) refresh(manual bool) (int, error) {
 	if platformName == "android" {
 		if err := s.routeQueue(peers, synced); err != nil {
 			syncErr = err
+		}
+	}
+	if count == 0 {
+		s.app.mu.Lock()
+		queued := s.app.dsh != nil && len(s.app.state.Queue) > 0
+		batch := s.app.batchPausedLocked() || (queued && s.app.status.Connected)
+		s.app.mu.Unlock()
+		if batch {
+			syncErr = errBatchRunning
+		} else if queued {
+			syncErr = errLANBatchQueued
+		} else if len(peers) == 0 {
+			s.mu.Lock()
+			recentPull := time.Since(s.lastPull) <= 15*time.Second
+			s.mu.Unlock()
+			if recentPull {
+				syncErr = errLANPeerPulling
+			}
 		}
 	}
 	if s.ctx.Err() == nil {
