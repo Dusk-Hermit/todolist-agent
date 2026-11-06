@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -37,9 +38,14 @@ type promptOutcome struct {
 	status   string
 	detail   string
 	response string
+	stage    string
+	evidence string
 }
 
 func (c *DSHClient) queuedResult(ctx context.Context, prompt *activePrompt, row *sessionRow) promptOutcome {
+	if c.endpoint().plugin {
+		return c.connectorResult(ctx, prompt)
+	}
 	if row == nil || row.Projections.AsOfSeq <= prompt.PreviousSeq {
 		return queuedProjectionResult(prompt, row)
 	}
@@ -96,6 +102,68 @@ func (c *DSHClient) queuedResult(ctx context.Context, prompt *activePrompt, row 
 		h.before, h.more = oldest, page.HasMore
 		h.pages++
 		h.records = append(page.Records, h.records...)
+	}
+}
+
+func (c *DSHClient) connectorResult(ctx context.Context, prompt *activePrompt) promptOutcome {
+	statusCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	raw, err := c.call(statusCtx, "todolist/status", map[string]any{
+		"request": map[string]string{"sessionId": prompt.Session, "requestId": prompt.ID},
+	})
+	var receipt struct {
+		Stage    string `json:"stage"`
+		Reason   string `json:"reason"`
+		Response string `json:"response"`
+		Turn     int    `json:"turn"`
+		Tools    []struct {
+			Name   string `json:"name"`
+			Status string `json:"status"`
+		} `json:"tools"`
+	}
+	if err != nil || json.Unmarshal(raw, &receipt) != nil {
+		return promptOutcome{detail: "暂时无法读取 DSH 插件的执行记录"}
+	}
+	var evidence string
+	if receipt.Stage == "completed" || receipt.Stage == "failed" {
+		succeeded, failed, unconfirmed := 0, 0, 0
+		var failures []string
+		for _, tool := range receipt.Tools {
+			switch tool.Status {
+			case "succeeded":
+				succeeded++
+			case "failed":
+				failed++
+				if len(failures) < 5 {
+					failures = append(failures, truncateRunes(tool.Name, 60))
+				}
+			default:
+				unconfirmed++
+			}
+		}
+		evidence = fmt.Sprintf("第 %d 轮 · 工具调用成功 %d、失败 %d、未确认 %d", receipt.Turn, succeeded, failed, unconfirmed)
+		if len(failures) > 0 {
+			evidence += " · 失败工具 " + strings.Join(failures, "、")
+		}
+	}
+	switch receipt.Stage {
+	case "completed":
+		return promptOutcome{status: "sent", response: receipt.Response, evidence: evidence}
+	case "failed":
+		detail := "DSH 未正常结束本轮，请查看原会话"
+		switch receipt.Reason {
+		case "aborted", "cancelled", "canceled":
+			detail = "DSH 已取消执行，可能已完成部分操作"
+		case "interrupted":
+			detail = "DSH 在本轮结束前中断，可能已完成部分操作"
+		}
+		return promptOutcome{status: "failed", detail: detail, evidence: evidence}
+	case "session-not-found":
+		return promptOutcome{stage: receipt.Stage, detail: "当前 DSH 配置中找不到原会话"}
+	case "not-found":
+		return promptOutcome{stage: receipt.Stage, detail: "原会话中尚未找到这条消息的执行记录"}
+	default:
+		return promptOutcome{stage: receipt.Stage}
 	}
 }
 

@@ -967,6 +967,7 @@
       case "todo.update":
       case "todo.start": return [e.actor === "agent" ? "agent" : "", "i-edit"];
       case "dsh.reply":
+      case "dsh.receipt":
       case "dsh.start":
       case "dsh.done": return ["agent", "i-spark"];
       default: return ["", "i-dot"];
@@ -1244,10 +1245,12 @@
     }
     $("connHint").textContent = d.error
       ? d.error
-      : "应用会读取 DSH 的本地签名密钥，直接调用当前会话的输入接口，不会另开进程。";
+      : cfg.manualUrl
+        ? "当前使用手动配置的 DSH Web 地址。"
+        : "默认通过本机 TodoList 连接插件访问 DSH 和核对执行状态。";
 
     if (fillInputs) {
-      $("baseUrlInput").value = cfg.baseUrl || d.baseUrl || "";
+      $("baseUrlInput").value = cfg.manualUrl || "";
       $("writeAgents").checked = S.data.prefs.writeAgents !== false;
       $("alwaysOnTop").checked = !!S.data.prefs.alwaysOnTop;
       $("compactPref").checked = S.viewMode === "compact";

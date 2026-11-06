@@ -33,13 +33,13 @@ TodoList Agent 把这一步搬到了桌面上：
 - 结果以干净的任务形式回来，原话仍然附着在旁边；
 - 你可以继续修改、拆子任务、设专注、删除或完成，不用离开这个窗口。
 
-所有数据都在本机。应用不截屏、不模拟键盘、不另起一个 DSH 进程，而是直接调用 DSH 自己的本地 Web API。
+桌面端通过本机的 TodoList 连接插件，把消息交给正在运行的 DSH。配对后的 Android 设备通过桌面端代发。
 
 ## 功能
 
 ### 真正的 DSH 会话，而不是单向表单
 
-- 自动发现本机正在运行的 DSH。
+- 自动连接本机 DSH 的 TodoList 插件。
 - 首次启动时创建并选中专用会话 `TodoList · DSH 联动`，之后持续复用。
 - 你发出的内容会作为普通用户消息进入 DSH，Agent 能看到完整上下文并正常回复。
 - DSH 可以通过本地桥接接口新增、修改、开始、完成、重新打开和删除任务。
@@ -102,13 +102,23 @@ TodoList Agent 把这一步搬到了桌面上：
 - **Microsoft Edge WebView2 Runtime**（Windows 11 通常自带）
 - 本机已安装并运行 **DeepSeek Harness**
 
-桌面端面向 **DSH 0.2.x**。Android 端支持 Android 8.0 及以上的 arm64 和 x86-64 设备。
+连接插件支持 **DSH 0.2.2 系列**（从 `0.2.2-rc.1` 起）。Android 端支持 Android 8.0 及以上的 arm64 和 x86-64 设备。
 
 ## 安装
 
 ### 使用发布包
 
 从 [GitHub Releases](https://github.com/Dusk-Hermit/todolist-agent/releases) 下载并运行 `TodoListAgent-Setup-win64.exe`。安装器会按当前用户安装、创建开始菜单快捷方式，并在系统缺少 WebView2 时联网补装。也可以解压 `TodoListAgent-win64.zip` 后运行 `install.cmd`。
+
+### 安装 DSH 连接插件
+
+在每台负责处理消息的 Windows 电脑上，从同一 Release 下载 `todolist-agent-dsh-connector-<版本>.tgz`，用 DSH 自带的命令安装到正在使用的配置。以桌面版为例，在 PowerShell 运行以下命令。
+
+```powershell
+dsh plugin --profile desktop add "C:\实际下载目录\todolist-agent-dsh-connector-0.4.12.tgz"
+```
+
+使用 DSH Web 版时将 `desktop` 改为 `web`，自定义配置则填入自己的配置名。如果 `dsh` 不在 PATH，可以用 PowerShell 的 `&` 调用 DSH 安装目录下的 `resources\runtime\cli\bin\dsh.cmd`。安装后重启该 DSH 配置，再打开 TodoList Agent，或在设置里点「重新连接」。Android 通过配对电脑获取执行结果。
 
 ### 免安装
 
@@ -118,7 +128,7 @@ TodoList Agent 把这一步搬到了桌面上：
 
 1. 启动 **DeepSeek Harness**。
 2. 启动 **TodoList Agent**。
-3. 应用会自动发现 DSH，并选中或创建专用会话 `TodoList · DSH 联动`。
+3. 应用会自动连接 DSH 插件，并选中或创建专用会话 `TodoList · DSH 联动`。
 4. 点击一次 **「让 DSH 维护这份清单」**，发送接入说明。它会告诉 DSH 本地接口地址、Token 和任务处理规则。
 5. 可以选择写入 `AGENTS.local.md`，让长时间运行的 DSH 会话在上下文压缩后仍然记得这些规则。
 
@@ -141,7 +151,7 @@ TodoList Agent 把这一步搬到了桌面上：
 
 在 Android 的系统分享菜单或长按文字的选单中选择 **TodoList Agent**，确认「加入待发队列」即可。分享的文字和在应用内输入的消息走同一条队列。
 
-缺少 DSH 接收确认或执行结果时，桌面端重连后会核对原会话。可以点「重新核对」立即发起检查，或在 Android 点「刷新同步」拉取最新状态。想法回顾会显示待核对或执行中断的原因。无法确定结果的消息保留待核对，避免重复执行可能已生效的操作。
+缺少 DSH 接收确认或执行结果时，桌面端会按原会话和请求 ID 核对，旧消息也可以按原有消息标记找回。可以点「重新核对」立即发起检查，或在 Android 点「刷新同步」拉取最新状态。「操作记录」会显示对应轮次及工具调用的成功、失败和未确认次数。无法确定结果的消息继续保留待核对，避免重复执行可能已生效的操作。请在保留原会话记录的 DSH 配置上核对。
 
 多电脑代发请将手机和执行 DSH 的电脑都升级到 0.4.0 或更高版本。等待原电脑确认的消息保留原归属，避免超时后在两台电脑重复执行。各电脑的 DSH 会话上下文保存在原电脑。组播受限时可用逗号分隔多个手动地址。
 
@@ -179,18 +189,13 @@ Windows 和 Android 启动时自动检查 GitHub Release，也可以在「设置
 
 ## 工作原理
 
-### 发现 DSH 与本地身份
+### DSH 连接与执行回执
 
-应用按以下顺序寻找 DSH：
+插件默认绑定 `127.0.0.1:17892`。需要换端口时，在 DSH 的配置覆盖文件里将插件行 `todolist-agent-connector` 的 `config.port` 改成指定端口。插件将实际端口和每次启动生成的连接密钥写入 `%USERPROFILE%\.dsh\todolist-connector.json`。桌面端只访问这个端口，请求和回执均加密并校验身份。请将这个文件保留在自己的 Windows 账户中。
 
-1. 环境变量 `DSH_WEB_URL`；
-2. 上次成功使用的地址；
-3. `http://127.0.0.1:13848`；
-4. 枚举 Windows 当前的回环监听端口（包括 DSH Desktop 的临时端口），并用 `session/list` 验证。
+插件的 `/todolist/v1/rpc` 接口仅允许列出、创建和重命名会话、提交文本消息及查询回执。`todolist/status` 根据原会话记录返回消息进入时间、轮次、结束原因和工具结果摘要。轮次正常结束和单次工具调用成功是两项独立信息。
 
-认证时，应用读取 `%USERPROFILE%\.dsh\.credentials.yaml` 中 `client-connection/browser-session` 的密钥，按 DSH 自己的格式签出短期会话 Cookie。密钥只在本机使用，不会写入任务数据。
-
-建议让 DSH 只监听 `127.0.0.1` 等回环地址。Android 把消息交给已配对的 Windows 应用，由电脑在本机联系 DSH。如果电脑上的其他进程抢占候选端口并模仿 DSH 接口，它可能收到代发消息和短期 Cookie。Windows 如果接受了伪造回复，回复可能作为文本同步到 Android 的操作记录。发送敏感内容前，先启动你信任的 DSH 并核对连接端口。确需配置远程 DSH 时，使用带有效证书的 HTTPS 地址。
+旧版 DSH Web API 仍可通过设置中的手动地址或显式的 `DSH_WEB_URL` 使用。该模式使用 DSH 的短期 Web Cookie 和旧版状态核对。将手动地址留空并取消 `DSH_WEB_URL` 即可切回插件。确需配置远程 DSH 时，使用带有效证书的 HTTPS 地址。
 
 ### 专用会话
 
@@ -274,7 +279,7 @@ POST /api/todos
 
 - 任务、想法和操作记录保存在本机。启用局域网同步后，这些数据会同步到配对设备。
 - 桥接服务只监听回环地址。
-- 凭据读取自 DSH 自己的本地凭据文件，不会进入任务正文或想法回顾。
+- 连接密钥由本机插件生成，仅在 Windows 桌面端和本机插件之间使用。
 - 应用不截屏、不控制键盘、不自动化 DSH 界面。
 
 ## 从源码构建
@@ -336,7 +341,7 @@ docs/         截图
 ## 致谢
 
 - 使用 [Go](https://go.dev/)、[go-webview2](https://github.com/jchv/go-webview2) 和 [systray](https://github.com/getlantern/systray) 构建。
-- DSH 集成基于 DeepSeek Harness 的本地 Web API。
+- DSH 集成使用 DeepSeek Harness 的插件和会话服务。
 - 视觉方向受暖纸、灰粉和鼠尾草绿启发。
 
 ---

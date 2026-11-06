@@ -185,7 +185,13 @@ func (c *DSHClient) pumpQueue(ctx context.Context, selected *sessionRow, session
 		a.mu.Unlock()
 		row := findSession(sessions, active.Session)
 		if outcome := c.queuedResult(ctx, active, row); outcome.status != "" {
-			c.finishQueued(active, outcome.status, outcome.detail, outcome.response)
+			c.finishQueued(active, outcome)
+		} else if outcome.stage == "queued" || outcome.stage == "accepted" || outcome.stage == "running" {
+			if !active.Accepted {
+				a.markPromptAccepted(active)
+			}
+		} else if outcome.detail != "" && (row == nil || !row.Running) {
+			c.expireActivePrompt(outcome.detail)
 		} else if row == nil {
 			c.expireActivePrompt("原 DSH 会话当前不可用")
 		} else if !row.Running {
@@ -240,7 +246,7 @@ func (c *DSHClient) pumpQueue(ctx context.Context, selected *sessionRow, session
 		return
 	}
 	if !*reply.Accepted {
-		c.finishQueued(active, "failed", "DSH 未接受消息", "")
+		c.finishQueued(active, promptOutcome{status: "failed", detail: "DSH 未接受消息"})
 		return
 	}
 	a.markPromptAccepted(active)
@@ -270,7 +276,7 @@ func (c *DSHClient) expireActivePrompt(reason string) {
 		if active.Accepted {
 			stage = "DSH 已接收"
 		}
-		c.finishQueued(active, "uncertain", stage+"，"+reason+"。重新连接后继续核对。", "")
+		c.finishQueued(active, promptOutcome{status: "uncertain", detail: stage + "，" + reason + "。重新连接后继续核对。"})
 	}
 }
 
@@ -282,7 +288,7 @@ func (c *DSHClient) reconcileUncertain(ctx context.Context, sessions []sessionRo
 	sessionsWithPending := make(map[string]bool, len(pending))
 	for _, prompt := range pending {
 		if outcome := c.queuedResult(ctx, &prompt, findSession(sessions, prompt.Session)); outcome.status != "" {
-			c.finishQueued(&prompt, outcome.status, outcome.detail, outcome.response)
+			c.finishQueued(&prompt, outcome)
 		} else {
 			sessionsWithPending[prompt.Session] = true
 		}
@@ -405,7 +411,8 @@ func recoverPromptTracking(st *persistedState) bool {
 	return changed
 }
 
-func (c *DSHClient) finishQueued(active *activePrompt, status, reason, response string) {
+func (c *DSHClient) finishQueued(active *activePrompt, outcome promptOutcome) {
+	status, reason, response := outcome.status, outcome.detail, outcome.response
 	a := c.app
 	a.mu.Lock()
 	next := a.state
@@ -449,6 +456,12 @@ func (c *DSHClient) finishQueued(active *activePrompt, status, reason, response 
 		next.Events = append(slices.Clone(next.Events), HistoryEvent{
 			ID: "prompt-end-" + active.ID, Kind: "dsh.prompt_end", Actor: "system", Title: "DSH 未完成消息",
 			Detail: reason, At: time.Now().UnixMilli(), SourceMessageID: active.ID,
+		})
+	}
+	if outcome.evidence != "" {
+		next.Events = append(next.Events, HistoryEvent{
+			ID: "prompt-receipt-" + active.ID, Kind: "dsh.receipt", Actor: "system", Title: "DSH 执行回执",
+			Detail: outcome.evidence, At: time.Now().UnixMilli(), SourceMessageID: active.ID,
 		})
 	}
 	err := a.persistLocked(next)

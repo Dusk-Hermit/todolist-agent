@@ -1,0 +1,3 @@
+- insert:
+    - id: todolist-agent-connector
+      name: todolist-agent-dsh-connector

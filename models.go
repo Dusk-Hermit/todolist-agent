@@ -2,7 +2,7 @@ package main
 
 const (
 	appName    = "TodoList Agent"
-	appVersion = "0.4.11"
+	appVersion = "0.4.12"
 	appID      = "Dusk.TodoListAgent"
 
 	statusTodo  = "todo"
@@ -84,6 +84,7 @@ type Prefs struct {
 
 type DSHConfig struct {
 	BaseURL     string `json:"baseUrl"`
+	ManualURL   string `json:"manualUrl,omitempty"`
 	SessionID   string `json:"sessionId"`
 	Workspace   string `json:"workspace"`
 	AutoConnect bool   `json:"autoConnect"`

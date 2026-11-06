@@ -33,13 +33,13 @@ TodoList Agent moves that first step into the desktop:
 - the result comes back as a clean task, with the original quote still attached;
 - you can refine, focus, split, delete, or finish it without leaving the window.
 
-Everything runs locally. The app does not take screenshots, simulate a keyboard, or start a second DSH process. It talks to DSH's own local Web API.
+The Windows app sends messages to the running DSH through the local TodoList connector. Paired Android devices relay messages through the Windows app.
 
 ## Features
 
 ### A real DSH conversation, not a one-way form
 
-- The app discovers the running DSH instance on your machine.
+- The app connects to the TodoList connector in the local DSH instance.
 - On first launch it creates a dedicated session named `TodoList · DSH 联动` and reuses it later.
 - Messages you send appear in DSH as normal user messages, so the agent sees the full context and can reply.
 - DSH can add, update, start, complete, reopen, and delete tasks through the local bridge API.
@@ -100,13 +100,23 @@ Every message sent from the desktop composer is stored as a **journal entry**, e
 - **Microsoft Edge WebView2 Runtime** (normally included with Windows 11)
 - **DeepSeek Harness** installed and running locally
 
-The Windows app targets **DSH 0.2.x**. The Android app supports Android 8.0 or later on arm64 and x86-64.
+The connector supports **DSH 0.2.2**, starting with `0.2.2-rc.1`. The Android app supports Android 8.0 or later on arm64 and x86-64.
 
 ## Install
 
 ### From a release
 
 Download and run `TodoListAgent-Setup-win64.exe` from [GitHub Releases](https://github.com/Dusk-Hermit/todolist-agent/releases). Setup installs for the current user, creates a Start menu shortcut, and downloads WebView2 if needed. The ZIP release also includes `install.cmd`.
+
+### Install the DSH connector
+
+On each Windows computer that handles prompts, download `todolist-agent-dsh-connector-<version>.tgz` from the same release and install it into the DSH profile you use. For DSH Desktop, run this in PowerShell.
+
+```powershell
+dsh plugin --profile desktop add "C:\path\to\todolist-agent-dsh-connector-0.4.12.tgz"
+```
+
+Use `web` for the DSH Web profile or specify your custom profile name. If `dsh` is outside PATH, use PowerShell's `&` to run `resources\runtime\cli\bin\dsh.cmd` inside the DSH installation folder. Restart the selected DSH profile and reopen TodoList Agent or click **重新连接** in its settings. Android receives execution results from the paired computer.
 
 ### Portable
 
@@ -116,7 +126,7 @@ Download and run `TodoListAgent-Setup-win64.exe` from [GitHub Releases](https://
 
 1. Start **DeepSeek Harness**.
 2. Launch **TodoList Agent**.
-3. The app discovers DSH and selects or creates the dedicated session `TodoList · DSH 联动`.
+3. The app connects to the DSH plugin and selects or creates the dedicated session `TodoList · DSH 联动`.
 4. Click **让 DSH 维护这份清单** once and send the onboarding message. This gives DSH the local bridge URL, token, and the task-handling rules.
 5. Optionally let the app write the managed block into `AGENTS.local.md`, so a long-running DSH session keeps the rules after compaction.
 
@@ -139,7 +149,7 @@ Android saves messages offline and shows the pending queue in Settings. After re
 
 To send text from another Android app, choose **TodoList Agent** in the system share sheet or in the text selection menu, then confirm **加入待发队列**. Shared text uses the same queue as messages typed into TodoList Agent.
 
-When a DSH acknowledgement or execution result is missing, the desktop app checks the original session on reconnect. Use **重新核对** to check again, or **刷新同步** on Android to pull the latest status. The journal shows the reason when a message needs review or DSH reports an interruption. Messages with an ambiguous result are kept for review to avoid repeating any actions they may already have performed.
+When an acknowledgement or execution result is missing, the desktop app checks the original session by request ID or the legacy message marker. Use **重新核对** to check again or **刷新同步** on Android to pull the latest status. The activity history shows the turn and counts of successful, failed, and unconfirmed tool calls. Messages with an ambiguous result stay under review to avoid repeating actions. Use the DSH profile that holds the original session history.
 
 For multi-PC routing, upgrade Android and every DSH computer to 0.4.0 or later. A prompt awaiting acknowledgement stays assigned to its original computer so that a connection failure cannot replay it on another computer. Each DSH session keeps its own context. Use comma-separated IPv4 addresses when multicast discovery is unavailable.
 
@@ -177,18 +187,13 @@ Download installers from this project's GitHub Releases. The Windows updater che
 
 ## How it works
 
-### DSH discovery and identity
+### DSH connection and execution receipts
 
-The app tries DSH addresses in this order:
+The plugin listens on `127.0.0.1:17892` by default. To change the port, set `config.port` on the `todolist-agent-connector` row in the DSH profile overlay. The plugin writes the active port and a fresh key to `%USERPROFILE%\.dsh\todolist-connector.json` on startup. The Windows app reads that single endpoint and encrypts and authenticates requests and receipts. Keep the file within your own Windows account.
 
-1. `DSH_WEB_URL`, if set;
-2. the last address that worked;
-3. `http://127.0.0.1:13848`;
-4. the loopback TCP listeners currently reported by Windows, including DSH Desktop's ephemeral port, validated with `session/list`.
+The versioned `/todolist/v1/rpc` endpoint allows session listing, creation, and renaming, text prompt submission, and receipt lookups. `todolist/status` reports the time the message entered the session, turn number, end reason, and tool outcomes. Turn completion and individual tool success are recorded separately.
 
-To authenticate, it reads the `client-connection/browser-session` secret from `%USERPROFILE%\.dsh\.credentials.yaml` and mints the same short-lived session cookie DSH uses for its own Web UI. The secret never leaves the machine and is not written into task data.
-
-Keep DSH bound to a loopback address such as `127.0.0.1`. Android sends prompts to the paired Windows app, which contacts DSH locally. A process on that Windows PC that takes over a candidate port and imitates the DSH API could receive prompts and the short-lived cookie. A forged reply accepted by Windows could then appear in Android's synced history as text. Start the DSH instance you trust and confirm its port before sending sensitive prompts. For an intentionally remote DSH endpoint, use HTTPS with a valid certificate.
+Set an explicit legacy Web address in Settings or via `DSH_WEB_URL` to use the old DSH Web API and cookie authentication. Clear both settings to switch back to the plugin. Use HTTPS with a valid certificate for an intentionally remote DSH endpoint.
 
 ### The dedicated session
 
@@ -272,7 +277,7 @@ Numbers change when tasks move, so DSH should re-read `GET /api/todos` before ac
 
 - Tasks, journal entries, and activity history are stored locally and copied to paired devices when LAN sync is enabled.
 - The bridge binds to loopback only.
-- Credentials are read from DSH's own local credential file and are never included in task text or journal entries.
+- The connector generates its own key for communication with the local Windows app.
 - The app does not capture the screen, control the keyboard, or automate the DSH UI.
 
 ## Build from source
@@ -334,7 +339,7 @@ docs/         screenshots
 ## Credits
 
 - Built with [Go](https://go.dev/), [go-webview2](https://github.com/jchv/go-webview2), and [systray](https://github.com/getlantern/systray).
-- DSH integration is based on DeepSeek Harness's local web API.
+- DSH integration uses the DeepSeek Harness plugin and session services.
 - The app's visual direction is inspired by warm paper, dusty rose, and sage green.
 
 ---

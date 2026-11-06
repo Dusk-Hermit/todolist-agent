@@ -319,8 +319,8 @@
           <span class="dot"></span><span id="connStatusText">正在连接…</span>
         </div>
         <label class="field">
-          <span>DSH 地址</span>
-          <input id="baseUrlInput" placeholder="自动检测，例如 http://127.0.0.1:13848" autocomplete="off" spellcheck="false">
+          <span>旧版 DSH Web 地址（可选）</span>
+          <input id="baseUrlInput" placeholder="留空使用本机 DSH 插件" autocomplete="off" spellcheck="false">
         </label>
         <div class="field">
           <span>目标会话</span>
@@ -341,7 +341,7 @@
           <span class="toggle"></span>
           <span class="toggle-copy"><b>写入工作区 AGENTS.local.md</b><small>让 DSH 在长会话/压缩后仍记得任务接口</small></span>
         </label>
-        <p class="field-hint" id="connHint">应用会读取 DSH 的本地签名密钥，直接调用当前会话的输入接口，不会另开进程。</p>
+        <p class="field-hint" id="connHint">默认通过本机 TodoList 连接插件访问 DSH 和核对执行状态。</p>
       </section>
 
       <section class="settings-section">
@@ -406,7 +406,7 @@
 
       <section class="settings-section about">
         <div class="section-title"><span class="section-index">05</span> 关于</div>
-        <p><b>TodoList Agent <span id="aboutVersion">0.4.11</span></b></p>
+        <p><b>TodoList Agent <span id="aboutVersion">0.4.12</span></b></p>
         <p class="desktop-only">桌面清单通过 DSH 的本地 Web API 向当前会话发送输入，并接收 DSH 对任务的修改。</p>
         <p class="mobile-only">任务和待发消息会保存在手机上。配对后，手机通过局域网同步任务，并将待发消息交给电脑处理。</p>
         <p class="field-hint" id="updateStatus" aria-live="polite"></p>

@@ -11,13 +11,10 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -80,10 +77,9 @@ type DSHClient struct {
 	app  *App
 	http *http.Client
 
-	mu       sync.Mutex
-	baseURL  string
-	secret   []byte
-	lastScan time.Time
+	mu        sync.Mutex
+	conn      dshEndpoint
+	reconnect atomic.Bool
 
 	reqMu  sync.Mutex
 	wake   chan struct{}
@@ -136,18 +132,15 @@ func (c *DSHClient) Reconfigure(baseURL, sessionID string) {
 	base := normalizeBase(baseURL)
 	a := c.app
 	a.mu.Lock()
-	if base != "" {
-		a.state.DSH.BaseURL = base
-	}
+	changed := a.state.DSH.ManualURL != base
+	a.state.DSH.ManualURL = base
 	if sessionID != "" {
 		a.state.DSH.SessionID = sessionID
 	}
 	a.mu.Unlock()
-	c.mu.Lock()
-	if base != "" {
-		c.baseURL = base
+	if changed {
+		c.reconnect.Store(true)
 	}
-	c.mu.Unlock()
 	a.markDirty()
 	a.emitState()
 	c.Wake()
@@ -187,23 +180,20 @@ func (c *DSHClient) SelectSession(id string) {
 // NewDedicatedSession creates a fresh DSH conversation for the desktop app.
 func (c *DSHClient) NewDedicatedSession() {
 	go func() {
-		c.mu.Lock()
-		base := c.baseURL
-		secret := c.secret
-		c.mu.Unlock()
-		if base == "" || len(secret) == 0 {
+		conn := c.endpoint()
+		if conn.base == "" {
 			c.app.toast("error", "还没有连接到 DSH")
 			return
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 		defer cancel()
-		items, err := c.listAt(ctx, base, secret, 10*time.Second)
+		items, err := c.listAt(ctx, conn, 10*time.Second)
 		if err != nil {
 			c.app.toast("error", "无法读取会话列表："+err.Error())
 			return
 		}
 		cwd := pickWorkspace(items)
-		sid, err := c.createDedicated(ctx, base, secret, cwd)
+		sid, err := c.createDedicated(ctx, conn, cwd)
 		if err != nil {
 			c.app.toast("error", "创建专用会话失败："+err.Error())
 			return
@@ -331,75 +321,32 @@ func (c *DSHClient) reportError(err error) {
 
 func (c *DSHClient) connect(ctx context.Context) error {
 	c.setConnecting()
-	secret, err := readDSHSecret()
+	c.app.mu.Lock()
+	manual := c.app.state.DSH.ManualURL
+	c.app.mu.Unlock()
+	if env := normalizeBase(os.Getenv("DSH_WEB_URL")); env != "" {
+		manual = env
+	}
+	var conn dshEndpoint
+	var err error
+	if manual != "" {
+		conn.base = manual
+		conn.secret, err = readDSHSecret()
+	} else {
+		conn, err = readDSHConnector()
+	}
 	if err != nil {
 		return err
 	}
-	c.mu.Lock()
-	c.secret = secret
-	base := c.baseURL
-	c.mu.Unlock()
-
-	candidates := c.candidates(base)
-	var lastErr error
-	for _, cand := range candidates {
-		if ctx.Err() != nil {
-			return ctx.Err()
+	items, err := c.listAt(ctx, conn, 8*time.Second)
+	if err != nil {
+		if conn.plugin {
+			return fmt.Errorf("无法连接 DSH 插件，请确认已启动安装插件的 DSH：%w", err)
 		}
-		if cand == "" {
-			continue
-		}
-		items, err := c.listAt(ctx, cand, secret, 5*time.Second)
-		if err == nil {
-			c.activate(ctx, cand, secret, items)
-			return nil
-		}
-		lastErr = err
+		return err
 	}
-
-	c.mu.Lock()
-	scanAge := time.Since(c.lastScan)
-	c.lastScan = time.Now()
-	c.mu.Unlock()
-	if scanAge > 10*time.Second {
-		if cand := c.scan(ctx, secret); cand != "" {
-			items, err := c.listAt(ctx, cand, secret, 5*time.Second)
-			if err == nil {
-				c.activate(ctx, cand, secret, items)
-				return nil
-			}
-			lastErr = err
-		}
-	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("未找到正在运行的 DeepSeek Harness")
-	}
-	return lastErr
-}
-
-func (c *DSHClient) candidates(current string) []string {
-	out := make([]string, 0, 4)
-	add := func(s string) {
-		s = normalizeBase(s)
-		if s == "" {
-			return
-		}
-		for _, v := range out {
-			if v == s {
-				return
-			}
-		}
-		out = append(out, s)
-	}
-	if v := os.Getenv("DSH_WEB_URL"); v != "" {
-		add(v)
-	}
-	add(current)
-	c.app.mu.Lock()
-	add(c.app.state.DSH.BaseURL)
-	c.app.mu.Unlock()
-	add("http://127.0.0.1:13848")
-	return out
+	c.activate(ctx, conn, items)
+	return nil
 }
 
 func pickWorkspace(items []sessionRow) string {
@@ -426,16 +373,12 @@ func pickWorkspace(items []sessionRow) string {
 // createDedicated creates one ordinary DSH session, names it after this app, and
 // returns its id. It is the zero-configuration path for a user who just opened
 // the desktop app without a stored session.
-func (c *DSHClient) createDedicated(ctx context.Context, base string, secret []byte, cwd string) (string, error) {
-	cookie, err := mintCookie(base, secret)
-	if err != nil {
-		return "", err
-	}
+func (c *DSHClient) createDedicated(ctx context.Context, conn dshEndpoint, cwd string) (string, error) {
 	request := map[string]any{}
 	if strings.TrimSpace(cwd) != "" {
 		request["cwd"] = cwd
 	}
-	raw, _, err := c.postWith(ctx, base, cookie, "session/create", map[string]any{"request": request}, 25*time.Second)
+	raw, _, err := c.invoke(ctx, conn, "session/create", map[string]any{"request": request}, 25*time.Second)
 	if err != nil {
 		return "", err
 	}
@@ -445,7 +388,7 @@ func (c *DSHClient) createDedicated(ctx context.Context, base string, secret []b
 	if err := json.Unmarshal(raw, &out); err != nil || out.SessionID == "" {
 		return "", fmt.Errorf("session/create 没有返回会话 id")
 	}
-	_, _, _ = c.postWith(ctx, base, cookie, "session/rename", map[string]any{
+	_, _, _ = c.invoke(ctx, conn, "session/rename", map[string]any{
 		"request": map[string]any{
 			"sessionId": out.SessionID,
 			"title":     "TodoList · DSH 联动",
@@ -454,14 +397,14 @@ func (c *DSHClient) createDedicated(ctx context.Context, base string, secret []b
 	return out.SessionID, nil
 }
 
-func (c *DSHClient) activate(ctx context.Context, base string, secret []byte, items []sessionRow) {
+func (c *DSHClient) activate(ctx context.Context, conn dshEndpoint, items []sessionRow) {
 	c.mu.Lock()
-	c.baseURL = base
+	c.conn = conn
 	c.mu.Unlock()
 
 	a := c.app
 	a.mu.Lock()
-	a.state.DSH.BaseURL = base
+	a.state.DSH.BaseURL = conn.base
 	selected := a.state.DSH.SessionID
 	workspace := a.state.DSH.Workspace
 	a.mu.Unlock()
@@ -482,9 +425,9 @@ func (c *DSHClient) activate(ctx context.Context, base string, secret []byte, it
 			if cwd == "" {
 				cwd = pickWorkspace(items)
 			}
-			if sid, err := c.createDedicated(ctx, base, secret, cwd); err == nil {
+			if sid, err := c.createDedicated(ctx, conn, cwd); err == nil {
 				selected = sid
-				if fresh, ferr := c.listWith(base, secret, 15*time.Second, ctx); ferr == nil {
+				if fresh, ferr := c.listAt(ctx, conn, 15*time.Second); ferr == nil {
 					items = fresh
 				}
 			} else {
@@ -526,7 +469,7 @@ func (c *DSHClient) activate(ctx context.Context, base string, secret []byte, it
 	st.Connecting = false
 	st.Error = ""
 	st.Armed = false
-	st.BaseURL = base
+	st.BaseURL = conn.base
 	st.SessionID = selected
 	if row := findSession(items, selected); row != nil {
 		st.SessionTitle = sessionTitle(row)
@@ -588,16 +531,11 @@ func findSession(items []sessionRow, id string) *sessionRow {
 }
 
 func (c *DSHClient) refresh(ctx context.Context) error {
-	c.mu.Lock()
-	base := c.baseURL
-	secret := c.secret
-	c.mu.Unlock()
-	if base == "" || len(secret) == 0 {
-		return fmt.Errorf("DSH 尚未连接")
+	if c.reconnect.Swap(false) {
+		return c.connect(ctx)
 	}
-	c.reqMu.Lock()
-	items, err := c.listWith(base, secret, 20*time.Second, ctx)
-	c.reqMu.Unlock()
+	conn := c.endpoint()
+	items, err := c.listAt(ctx, conn, 20*time.Second)
 	if err != nil {
 		return err
 	}
@@ -636,7 +574,7 @@ func (c *DSHClient) refresh(ctx context.Context) error {
 	st.Connected = true
 	st.Connecting = false
 	st.Error = ""
-	st.BaseURL = base
+	st.BaseURL = conn.base
 	st.SessionID = ""
 	st.CheckedAt = time.Now().UnixMilli()
 	st.Running = false
@@ -726,25 +664,16 @@ func truncateRunes(s string, n int) string {
 	return string(r[:n]) + "…"
 }
 
-func (c *DSHClient) listAt(ctx context.Context, base string, secret []byte, timeout time.Duration) ([]sessionRow, error) {
+func (c *DSHClient) endpoint() dshEndpoint {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.conn
+}
+
+func (c *DSHClient) listAt(ctx context.Context, conn dshEndpoint, timeout time.Duration) ([]sessionRow, error) {
 	c.reqMu.Lock()
 	defer c.reqMu.Unlock()
-	return c.listWith(base, secret, timeout, ctx)
-}
-
-func (c *DSHClient) listWith(base string, secret []byte, timeout time.Duration, ctx context.Context) ([]sessionRow, error) {
-	return c.listWithTimeout(base, secret, timeout, ctx)
-}
-
-func (c *DSHClient) listWithTimeout(base string, secret []byte, timeout time.Duration, ctx context.Context) ([]sessionRow, error) {
-	cookie, err := mintCookie(base, secret)
-	if err != nil {
-		return nil, err
-	}
-	raw, status, err := c.postWith(ctx, base, cookie, "session/list", map[string]any{"_request": map[string]any{}}, timeout)
-	if status == http.StatusUnauthorized {
-		return nil, errUnauthorized
-	}
+	raw, _, err := c.invoke(ctx, conn, "session/list", map[string]any{"_request": map[string]any{}}, timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -760,33 +689,33 @@ func (c *DSHClient) listWithTimeout(base string, secret []byte, timeout time.Dur
 func (c *DSHClient) call(ctx context.Context, method string, args any) (json.RawMessage, error) {
 	c.reqMu.Lock()
 	defer c.reqMu.Unlock()
-	c.mu.Lock()
-	base := c.baseURL
-	secret := c.secret
-	c.mu.Unlock()
-	if base == "" || len(secret) == 0 {
-		return nil, fmt.Errorf("DSH 尚未连接")
-	}
-	cookie, err := mintCookie(base, secret)
-	if err != nil {
-		return nil, err
-	}
-	raw, status, err := c.postWith(ctx, base, cookie, method, args, 25*time.Second)
-	if status == http.StatusUnauthorized {
-		// The signing secret may have been rotated; reload once.
-		if fresh, rerr := readDSHSecret(); rerr == nil && !bytes.Equal(fresh, secret) {
+	conn := c.endpoint()
+	raw, _, err := c.invoke(ctx, conn, method, args, 25*time.Second)
+	if errors.Is(err, errUnauthorized) && !conn.plugin {
+		// The legacy Web signing key can rotate independently of the app.
+		if fresh, readErr := readDSHSecret(); readErr == nil && !bytes.Equal(fresh, conn.secret) {
+			conn.secret = fresh
 			c.mu.Lock()
-			c.secret = fresh
+			c.conn = conn
 			c.mu.Unlock()
-			if cookie, err = mintCookie(base, fresh); err == nil {
-				raw, status, err = c.postWith(ctx, base, cookie, method, args, 25*time.Second)
-			}
-		}
-		if status == http.StatusUnauthorized {
-			return nil, errUnauthorized
+			raw, _, err = c.invoke(ctx, conn, method, args, 25*time.Second)
 		}
 	}
 	return raw, err
+}
+
+func (c *DSHClient) invoke(ctx context.Context, conn dshEndpoint, method string, args any, timeout time.Duration) (json.RawMessage, int, error) {
+	if conn.base == "" {
+		return nil, 0, fmt.Errorf("DSH 尚未连接")
+	}
+	if conn.plugin {
+		return c.callConnector(ctx, conn, method, args, timeout)
+	}
+	cookie, err := mintCookie(conn.base, conn.secret)
+	if err != nil {
+		return nil, 0, err
+	}
+	return c.postWith(ctx, conn.base, cookie, method, args, timeout)
 }
 
 func (c *DSHClient) postWith(ctx context.Context, base, cookie, method string, args any, timeout time.Duration) (json.RawMessage, int, error) {
@@ -831,124 +760,21 @@ func (c *DSHClient) postWith(ctx context.Context, base, cookie, method string, a
 	if resp.StatusCode != http.StatusOK {
 		return nil, resp.StatusCode, fmt.Errorf("DSH 返回 HTTP %d: %s", resp.StatusCode, truncateRunes(string(data), 180))
 	}
+	return decodeDSHResult(data, resp.StatusCode)
+}
+
+func decodeDSHResult(data []byte, status int) (json.RawMessage, int, error) {
 	var env rpcEnvelope
 	if err := json.Unmarshal(data, &env); err != nil {
-		return nil, resp.StatusCode, fmt.Errorf("解析 DSH 响应失败: %w", err)
+		return nil, status, fmt.Errorf("解析 DSH 响应失败: %w", err)
 	}
 	if !env.Result.OK {
 		if env.Result.Error != nil {
-			return nil, resp.StatusCode, fmt.Errorf("%s: %s", env.Result.Error.Code, env.Result.Error.Message)
+			return nil, status, fmt.Errorf("%s: %s", env.Result.Error.Code, env.Result.Error.Message)
 		}
-		return nil, resp.StatusCode, fmt.Errorf("DSH 调用失败")
+		return nil, status, fmt.Errorf("DSH 调用失败")
 	}
-	return env.Result.Value, resp.StatusCode, nil
-}
-
-func (c *DSHClient) scan(ctx context.Context, secret []byte) string {
-	type hit struct{ base string }
-	results := make(chan string, 8)
-	stop := make(chan struct{})
-	var once sync.Once
-	sem := make(chan struct{}, 24)
-	var wg sync.WaitGroup
-	ports := make([]int, 0, 180)
-	seen := make(map[int]bool)
-	addPort := func(p int) {
-		if p <= 0 || p > 65535 || seen[p] {
-			return
-		}
-		seen[p] = true
-		ports = append(ports, p)
-	}
-	for port := 13800; port <= 13920; port++ {
-		addPort(port)
-	}
-	// DSH's desktop host picks an ephemeral loopback port on startup. The old
-	// fixed range missed those instances; enumerate the listeners Windows
-	// already knows about and probe them as well.
-	for _, port := range listeningPorts() {
-		addPort(port)
-	}
-	for _, port := range ports {
-		wg.Add(1)
-		go func(p int) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			addr := fmt.Sprintf("127.0.0.1:%d", p)
-			conn, err := net.DialTimeout("tcp", addr, 120*time.Millisecond)
-			if err != nil {
-				return
-			}
-			_ = conn.Close()
-			base := "http://" + addr
-			probeCtx, cancel := context.WithTimeout(ctx, 1200*time.Millisecond)
-			defer cancel()
-			if _, err := c.listWithTimeout(base, secret, 1*time.Second, probeCtx); err == nil {
-				once.Do(func() {
-					select {
-					case results <- base:
-					default:
-					}
-					close(stop)
-				})
-			}
-		}(port)
-	}
-	done := make(chan struct{})
-	go func() { wg.Wait(); close(done) }()
-	select {
-	case base := <-results:
-		return base
-	case <-done:
-		return ""
-	case <-time.After(7 * time.Second):
-		close(stop)
-		return ""
-	case <-ctx.Done():
-		return ""
-	}
-}
-
-// listeningPorts returns loopback TCP ports in LISTEN state. netstat is used
-// instead of a fixed port range because DSH Desktop allocates a fresh ephemeral
-// port every time it starts.
-func listeningPorts() []int {
-	out, err := exec.Command("netstat", "-ano", "-p", "tcp").Output()
-	if err != nil {
-		return nil
-	}
-	seen := make(map[int]bool)
-	ports := make([]int, 0, 64)
-	for _, line := range strings.Split(string(out), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 4 || !strings.EqualFold(fields[0], "TCP") {
-			continue
-		}
-		local, remote := fields[1], fields[2]
-		if !strings.HasSuffix(remote, ":0") {
-			continue
-		}
-		host, portText, err := net.SplitHostPort(local)
-		if err != nil {
-			continue
-		}
-		if host != "127.0.0.1" && host != "0.0.0.0" && host != "::" && host != "::1" {
-			continue
-		}
-		port, err := strconv.Atoi(portText)
-		if err != nil || port < 1024 || seen[port] {
-			continue
-		}
-		seen[port] = true
-		ports = append(ports, port)
-	}
-	return ports
+	return env.Result.Value, status, nil
 }
 
 func (c *DSHClient) SendPrompt(text string, onboarding bool) (string, error) {

@@ -27,7 +27,7 @@ func TestQueuedResultUsesCompletedSessionEvents(t *testing.T) {
 	}))
 	defer mock.Close()
 	c := newDSHClient(isolatedApp(t))
-	c.baseURL, c.secret = mock.URL, []byte("test signing key")
+	c.conn = dshEndpoint{base: mock.URL, secret: []byte("test signing key")}
 	row := sessionRow{SessionID: "test"}
 	row.Projections.AsOfSeq = 17
 	for id, want := range map[string]string{"first": "sent", "second": "failed", "missing": ""} {

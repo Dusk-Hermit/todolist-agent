@@ -35,7 +35,7 @@ func TestInterruptedDSHTurnSettlesAfterRestart(t *testing.T) {
 	defer server.Close()
 	c := newDSHClient(restarted)
 	restarted.dsh = c
-	c.baseURL, c.secret = server.URL, []byte("fixture key")
+	c.conn = dshEndpoint{base: server.URL, secret: []byte("fixture key")}
 	row := sessionRow{SessionID: "original", Running: true}
 	row.Projections.AsOfSeq = 3
 	c.pumpQueue(t.Context(), &row, []sessionRow{row})
@@ -58,7 +58,7 @@ func TestPromptCompletionSurvivesRestartAndStalePeer(t *testing.T) {
 		t.Fatal(err)
 	}
 	stale.capture(map[string]json.RawMessage{"message:prompt": record}, time.Now().Add(time.Hour).UnixMilli())
-	newDSHClient(a).finishQueued(prompt, "sent", "", "")
+	newDSHClient(a).finishQueued(prompt, promptOutcome{status: "sent"})
 
 	restarted := NewApp()
 	restarted.dataPath = a.dataPath
@@ -123,7 +123,7 @@ func TestPromptAcceptanceIsDurableAndAmbiguousDeliveryIsNotReplayed(t *testing.T
 	defer server.Close()
 	c := newDSHClient(restarted)
 	restarted.dsh = c
-	c.baseURL, c.secret = server.URL, []byte("fixture key")
+	c.conn = dshEndpoint{base: server.URL, secret: []byte("fixture key")}
 	other := sessionRow{SessionID: "other"}
 	c.pumpQueue(t.Context(), &other, []sessionRow{other})
 	c.pumpQueue(t.Context(), &other, []sessionRow{other})
