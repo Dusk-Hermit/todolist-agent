@@ -27,8 +27,7 @@
     journalLoading: false,
     lastMessageTotal: -1,
     collapsedGroups: {},
-    dragId: null,
-    dropTarget: null,
+    drag: null,
     suppressClick: false,
   };
 
@@ -229,7 +228,7 @@
     renderSendState();
     updateSetupBanner();
     if (S.settingsOpen) updateSettings(false);
-    if (!wasRunning && st.running) {
+    if (!wasRunning && st.running && !S.drag?.ghost) {
       // Scroll the list to the top so the running task is visible.
       const list = $("list");
       if (list) list.scrollTop = 0;
@@ -430,6 +429,12 @@
     return `<button class="icon-btn focus ${focused ? "active" : ""}" data-act="focus" title="${label}" aria-label="${label}" aria-pressed="${focused}"><svg class="icon"><use href="#i-target"/></svg></button>`;
   }
 
+  function taskNumberHTML(t, className) {
+    const number = esc(t.number || "");
+    if (t.status !== "todo") return `<span class="${className}">${number}</span>`;
+    return `<span class="${className} drag-grip" data-drag-grip title="拖动排序" aria-label="任务 ${number}，拖动排序"><span aria-hidden="true">⠿</span>${number}</span>`;
+  }
+
   function subtaskRowHTML(t) {
     const done = t.status === "done";
     const dropped = t.status === "dropped";
@@ -439,7 +444,7 @@
       <button class="scheck" data-act="toggle" aria-label="${done || dropped ? "重新打开" : "完成子任务"}" title="${done || dropped ? "重新打开" : "完成子任务"}">
         <svg class="icon"><use href="#i-check"/></svg>
       </button>
-      <span class="subtask-num">${esc(t.number || "")}</span>
+      ${taskNumberHTML(t, "subtask-num")}
       <div class="subtask-main">
         <div class="stitle" data-act="edit">${esc(t.title)}</div>
         ${t.notes ? `<div class="snotes">${esc(t.notes)}</div>` : ""}
@@ -481,11 +486,11 @@
       ${children.map(subtaskRowHTML).join("")}
       <button class="sub-add" data-act="sub-add" data-parent-id="${esc(t.id)}">+ 添加子任务</button>
     </div>` : "";
-    return `<article class="todo prio-${priorityKey(t)} ${focused ? "focused" : ""} ${done ? "done" : ""} ${doing ? "doing" : ""} ${dropped ? "dropped" : ""}" data-id="${esc(t.id)}" draggable="${t.status === "todo" ? "true" : "false"}">
+    return `<article class="todo prio-${priorityKey(t)} ${focused ? "focused" : ""} ${done ? "done" : ""} ${doing ? "doing" : ""} ${dropped ? "dropped" : ""}" data-id="${esc(t.id)}">
       <button class="check" data-act="toggle" aria-label="${done ? "标记为待办" : "标记为完成"}" title="${done ? "标记为待办" : "标记为完成"}">
         <svg class="icon"><use href="#i-check"/></svg>
       </button>
-      <span class="todo-num">${esc(t.number || "")}</span>
+      ${taskNumberHTML(t, "todo-num")}
       <div class="todo-main">
         <div class="todo-title" data-act="edit" title="点击编辑">${esc(t.title)}</div>
         ${notes}${reason}
@@ -513,11 +518,11 @@
     const focused = !!(S.data && S.data.focusId === t.id);
     const children = isChild ? [] : childrenOf(t.id);
     const sub = children.length ? `<span>· ${children.filter((c) => c.status === "done" || c.status === "dropped").length}/${children.length}</span>` : "";
-    return `<div class="crow prio-${priorityKey(t)} ${focused ? "focused" : ""} ${isChild ? "child" : ""} ${done ? "done" : ""} ${doing ? "doing" : ""} ${dropped ? "dropped" : ""}" data-id="${esc(t.id)}" draggable="${!isChild && t.status === "todo" ? "true" : "false"}">
+    return `<div class="crow prio-${priorityKey(t)} ${focused ? "focused" : ""} ${isChild ? "child" : ""} ${done ? "done" : ""} ${doing ? "doing" : ""} ${dropped ? "dropped" : ""}" data-id="${esc(t.id)}">
       <button class="ccheck" data-act="toggle" aria-label="${checked ? "重新打开" : "标记完成"}" title="${checked ? "重新打开" : "标记完成"}">
         <svg class="icon"><use href="#i-check"/></svg>
       </button>
-      <span class="crow-num">${esc(t.number || "")}</span>
+      ${taskNumberHTML(t, "crow-num")}
       <div class="crow-main">
         <div class="crow-title" data-act="edit" title="${esc(t.notes || t.title)}">${esc(t.title)}</div>
         <div class="crow-meta">
@@ -611,101 +616,133 @@
     }).join("");
   }
 
-  function dragHost(target) {
-    if (!target || target.closest(".subtask, .crow.child")) return null;
-    return target.closest("article.todo, .crow");
-  }
-
-  function dropTargetAt(target) {
-    const divider = target && target.closest(".prio-divider");
+  function dropTargetAt(target, source, y) {
+    const divider = !source.parentId && target?.closest(".prio-divider");
     if (divider) {
-      return { kind: "divider", priority: divider.dataset.priority, el: divider };
+      return { el: divider, priority: divider.dataset.priority, hint: "drop-over" };
     }
-    const host = dragHost(target);
-    if (!host) return null;
-    const t = findTodo(host.dataset.id);
-    if (!t || t.status !== "todo") return null;
-    return { kind: "task", id: t.id, priority: priorityKey(t), el: host };
-  }
-
-  function clearDropHints() {
-    document.querySelectorAll(".drop-before, .drop-after, .drop-over").forEach((el) => {
-      el.classList.remove("drop-before", "drop-after", "drop-over");
-    });
-  }
-
-  function onDragStart(e) {
-    const host = dragHost(e.target);
-    if (!host) {
-      e.preventDefault();
-      return;
+    let row = target?.closest(".todo, .crow, .subtask");
+    if (!source.parentId && row?.classList.contains("subtask")) row = row.closest(".todo");
+    if (!source.parentId) {
+      while (row?.classList.contains("child")) row = row.previousElementSibling;
     }
-    S.dragId = host.dataset.id;
-    S.dropTarget = null;
-    try {
-      e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData("text/plain", S.dragId);
-    } catch (_) {}
-    setTimeout(() => host.classList.add("dragging"), 0);
+    const task = row && findTodo(row.dataset.id);
+    if (!task || task.id === source.id || task.status !== "todo" ||
+        (task.parentId || "") !== (source.parentId || "")) return null;
+    const rect = row.getBoundingClientRect();
+    const after = y > rect.top + rect.height / 2;
+    return { el: row, id: task.id, priority: priorityKey(task), after, hint: after ? "drop-after" : "drop-before" };
   }
 
-  function onDragOver(e) {
-    if (!S.dragId) return;
-    const target = dropTargetAt(e.target);
-    if (!target) return;
-    if (target.kind === "task" && target.id === S.dragId) {
-      clearDropHints();
-      S.dropTarget = null;
-      return;
+  function insideList(rect, x, y) {
+    return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
+  }
+
+  function updateDropHint(drag, rect) {
+    const task = findTodo(drag.id);
+    let target = null;
+    if (task?.status === "todo" && insideList(rect, drag.x, drag.y)) {
+      const hit = document.elementFromPoint(drag.x, drag.y);
+      if (hit && drag.list.contains(hit)) target = dropTargetAt(hit, task, drag.y);
+    }
+    if (target?.el !== drag.target?.el || target?.hint !== drag.target?.hint) {
+      if (drag.target) drag.target.el.classList.remove(drag.target.hint);
+      if (target) target.el.classList.add(target.hint);
+    }
+    drag.target = target;
+  }
+
+  function edgeScrollSpeed(rect, y) {
+    const edge = Math.min(72, rect.height / 3);
+    if (edge <= 0 || y < rect.top || y >= rect.bottom) return 0;
+    const top = Math.max(0, 1 - (y - rect.top) / edge);
+    const bottom = Math.max(0, 1 - (rect.bottom - y) / edge);
+    return 1100 * (bottom ** 2 - top ** 2);
+  }
+
+  function tickDrag(now) {
+    const drag = S.drag;
+    if (!drag?.ghost) return;
+    const rect = drag.list.getBoundingClientRect();
+    if (insideList(rect, drag.x, drag.y)) {
+      const speed = edgeScrollSpeed(rect, drag.y);
+      const elapsed = drag.lastFrame ? Math.min(now - drag.lastFrame, 32) : 16;
+      const step = speed * elapsed / 1000;
+      if (step) drag.list.scrollTop += Math.sign(step) * Math.max(1, Math.abs(step));
+    }
+    drag.lastFrame = now;
+    updateDropHint(drag, rect);
+    drag.frame = requestAnimationFrame(tickDrag);
+  }
+
+  function beginDrag(e) {
+    if (S.drag || !e.isPrimary || e.button !== 0) return;
+    const grip = e.target.closest("[data-drag-grip]");
+    if (!grip && (e.pointerType !== "mouse" || e.target.closest("button, [data-act], a"))) return;
+    const row = e.target.closest(".todo, .crow, .subtask");
+    const task = row && findTodo(row.dataset.id);
+    if (task?.status !== "todo") return;
+    S.drag = { list: e.currentTarget, row, id: task.id, pointer: e.pointerId,
+      startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+
+  function moveDrag(e) {
+    const drag = S.drag;
+    if (!drag || drag.pointer !== e.pointerId) return;
+    drag.x = e.clientX;
+    drag.y = e.clientY;
+    if (!drag.ghost) {
+      if (Math.hypot(drag.x - drag.startX, drag.y - drag.startY) < 5) return;
+      const task = findTodo(drag.id);
+      if (!task || !drag.row.isConnected) {
+        finishDrag(false);
+        return;
+      }
+      drag.row.classList.add("dragging");
+      drag.ghost = document.createElement("div");
+      drag.ghost.className = "drag-ghost";
+      drag.ghost.setAttribute("aria-hidden", "true");
+      drag.ghost.textContent = task.title;
+      document.body.append(drag.ghost);
+      drag.frame = requestAnimationFrame(tickDrag);
     }
     e.preventDefault();
-    try {
-      e.dataTransfer.dropEffect = "move";
-    } catch (_) {}
-    clearDropHints();
-    if (target.kind === "divider") {
-      target.el.classList.add("drop-over");
-      S.dropTarget = { kind: "divider", priority: target.priority };
-    } else {
-      const r = target.el.getBoundingClientRect();
-      const after = e.clientY > r.top + r.height / 2;
-      target.el.classList.add(after ? "drop-after" : "drop-before");
-      S.dropTarget = { kind: "task", id: target.id, priority: target.priority, after };
-    }
+    drag.ghost.style.left = Math.max(8, Math.min(drag.x + 12, window.innerWidth - drag.ghost.offsetWidth - 8)) + "px";
+    drag.ghost.style.top = Math.max(8, drag.y - 34) + "px";
+    updateDropHint(drag, drag.list.getBoundingClientRect());
   }
 
-  function onDragLeave(e) {
-    if (!S.dragId) return;
-    if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
-    clearDropHints();
-    S.dropTarget = null;
-  }
-
-  function onDragEnd() {
-    clearDropHints();
-    document.querySelectorAll(".dragging").forEach((el) => el.classList.remove("dragging"));
-    S.dragId = null;
-    S.dropTarget = null;
-  }
-
-  function onDrop(e) {
-    if (!S.dragId || !S.dropTarget) return;
-    e.preventDefault();
-    const id = S.dragId;
-    const target = S.dropTarget;
-    clearDropHints();
-    document.querySelectorAll(".dragging").forEach((el) => el.classList.remove("dragging"));
-    S.dragId = null;
-    S.dropTarget = null;
-    if (target.kind === "task" && (!target.id || target.id === id)) return;
+  function finishDrag(commit) {
+    const drag = S.drag;
+    if (!drag) return;
+    S.drag = null;
+    if (drag.list.hasPointerCapture(drag.pointer)) drag.list.releasePointerCapture(drag.pointer);
+    if (!drag.ghost) return;
+    cancelAnimationFrame(drag.frame);
+    drag.ghost.remove();
+    drag.row.classList.remove("dragging");
+    if (drag.target) drag.target.el.classList.remove(drag.target.hint);
     S.suppressClick = true;
-    setTimeout(() => {
-      S.suppressClick = false;
-    }, 260);
-    const beforeId = target.kind === "task" ? target.id : "";
-    call("todo_moveTodo", id, target.priority, beforeId, !!target.after).catch((err) => {
-      showToast("error", errText(err));
-    });
+    setTimeout(() => { S.suppressClick = false; }, 200);
+    renderTodos(false);
+    if (commit && drag.target) {
+      const target = drag.target;
+      call("todo_moveTodo", drag.id, target.priority, target.id || "", !!target.after)
+        .catch((err) => showToast("error", errText(err)));
+    }
+  }
+
+  function endDrag(e) {
+    const drag = S.drag;
+    if (!drag || drag.pointer !== e.pointerId) return;
+    const commit = e.type === "pointerup";
+    if (commit && drag.ghost) {
+      drag.x = e.clientX;
+      drag.y = e.clientY;
+      updateDropHint(drag, drag.list.getBoundingClientRect());
+    }
+    finishDrag(commit);
   }
 
   function emptyCopy() {
@@ -729,6 +766,7 @@
   }
 
   function renderTodos(force) {
+    if (S.drag?.ghost) return;
     const list = $("list");
     const empty = $("empty");
     const items = visibleTodos();
@@ -1680,11 +1718,13 @@
     });
 
     const listEl = $("list");
-    listEl.addEventListener("dragstart", onDragStart);
-    listEl.addEventListener("dragover", onDragOver);
-    listEl.addEventListener("dragleave", onDragLeave);
-    listEl.addEventListener("drop", onDrop);
-    listEl.addEventListener("dragend", onDragEnd);
+    listEl.addEventListener("pointerdown", beginDrag);
+    listEl.addEventListener("pointermove", moveDrag);
+    listEl.addEventListener("pointerup", endDrag);
+    listEl.addEventListener("pointercancel", endDrag);
+    listEl.addEventListener("lostpointercapture", endDrag);
+    window.addEventListener("blur", () => finishDrag(false));
+    window.addEventListener("keydown", (e) => { if (e.key === "Escape") finishDrag(false); });
 
     $("taskClose").addEventListener("click", closeTaskModal);
     $("taskCancel").addEventListener("click", closeTaskModal);

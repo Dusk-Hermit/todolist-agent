@@ -166,7 +166,7 @@ Download installers from this project's GitHub Releases. The Windows updater che
 | Click the checkbox | Complete / reopen a task |
 | Click a task title | Open the task editor |
 | Click the target icon | Focus / unfocus a task |
-| Drag a task | Reorder, or move it to another priority band |
+| Drag the grip next to a task number | Reorder tasks or subtasks, or move a top-level task to another priority band. Hold near a list edge to scroll. |
 | Book icon | Open the thought journal |
 | Clock icon | Open activity history |
 | List / grid icon | Switch card and compact views |

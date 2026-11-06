@@ -919,14 +919,40 @@ svg {
   font-weight: 500;
 }
 
-/* Drag and drop */
-.todo[draggable="true"],
-.crow[draggable="true"] {
+.drag-grip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.drag-grip > span {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.drag-ghost {
+  position: fixed;
+  z-index: 20;
+  max-width: min(260px, calc(100vw - 16px));
+  padding: 5px 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text-2);
+  box-shadow: 0 4px 14px rgba(var(--ink), 0.17);
+  font-size: 12px;
 }
 
 .todo.dragging,
-.crow.dragging {
+.crow.dragging,
+.subtask.dragging {
   opacity: 0.38;
 }
 
@@ -2787,6 +2813,10 @@ html:not(.android) .mobile-only,
 .android .toolbar { gap: 5px; }
 .android .filter { padding-inline: 6px; }
 .android .button-row { flex-wrap: wrap; }
+.android .drag-grip {
+  min-width: 24px;
+  min-height: 24px;
+}
 .android .todo-actions,
 .android .sactions,
 .android .crow-actions {
