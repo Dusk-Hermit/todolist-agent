@@ -1194,8 +1194,8 @@
       ? `已启用 · 发现 ${peers.length} 台设备${active ? " · 当前代发 " + active.name : ""}${paused ? " · DSH 处理完后自动同步" : ""}`
       : "在一台设备生成配对码，再粘贴到同一局域网内的其他设备。");
     $("lanPeers").innerHTML = peers.map((p) =>
-      `<li>${esc(p.name)} · ${esc(p.address)}${p.dshAddress ? (p.dispatch ? " · DSH" : " · DSH 代发需升级") : ""}</li>`).join("");
-    const choices = peers.filter((p) => p.platform === "windows" && p.dispatch && p.dshAddress);
+      `<li>${esc(p.name)} · ${esc(p.address)}${p.needsUpgrade ? " · 同步需升级" : p.dshAddress ? (p.dispatch ? " · DSH" : " · DSH 代发需升级") : ""}</li>`).join("");
+    const choices = peers.filter((p) => !p.needsUpgrade && p.platform === "windows" && p.dispatch && p.dshAddress);
     const select = $("lanDSH");
     const preferred = S.lan.dshDevice || "";
     const offline = preferred && !choices.some((p) => p.id === preferred)

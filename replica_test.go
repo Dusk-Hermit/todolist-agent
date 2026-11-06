@@ -22,22 +22,46 @@ func TestReplicaConcurrentAddsAndEdits(t *testing.T) {
 	}
 }
 
-func TestReplicaConflictReplacesWholeListAndStalePeerCannotResurrect(t *testing.T) {
+func TestReplicaTaskConflictPreservesOtherEditsAndDeletes(t *testing.T) {
 	seed := replica{Device: "seed"}
-	seed.capture(map[string]json.RawMessage{"todo:base": json.RawMessage(`"base"`)}, 100)
-	left, right := seed, seed
-	left.Device, right.Device = "desktop", "phone"
-	left.capture(map[string]json.RawMessage{"todo:base": json.RawMessage(`"left"`), "todo:discard": json.RawMessage(`"discard"`)}, 200)
-	right.capture(map[string]json.RawMessage{"todo:keep": json.RawMessage(`"keep"`)}, 300)
-	stale := left
-	left.merge(right)
-	right.merge(stale)
-	left.merge(stale)
-	for _, state := range []replica{left, right} {
-		if len(state.Tasks["todo:base"].Value) != 0 || len(state.Tasks["todo:discard"].Value) != 0 ||
-			string(state.Tasks["todo:keep"].Value) != `"keep"` {
-			t.Fatalf("unexpected conflict result: %+v", state.Tasks)
+	seed.capture(map[string]json.RawMessage{
+		"todo:shared": json.RawMessage(`"base"`), "todo:delete": json.RawMessage(`"old"`),
+	}, 100)
+	left, right, third := seed, seed, seed
+	left.Device, right.Device, third.Device = "desktop", "phone", "other-desktop"
+	left.capture(map[string]json.RawMessage{"todo:shared": json.RawMessage(`"left"`), "todo:a": json.RawMessage(`"a"`)}, 200)
+	right.capture(map[string]json.RawMessage{
+		"todo:shared": json.RawMessage(`"right"`), "todo:b": json.RawMessage(`"b"`), "todo:delete": json.RawMessage(`"old"`),
+	}, 300)
+	third.capture(map[string]json.RawMessage{
+		"todo:shared": json.RawMessage(`"base"`), "todo:c": json.RawMessage(`"c"`), "todo:delete": json.RawMessage(`"old"`),
+	}, 400)
+	for _, order := range [][]replica{{left, right, third}, {third, left, right}, {right, third, left}} {
+		state := order[0]
+		for _, peer := range append(order[1:], seed) {
+			state.merge(peer)
 		}
+		for key, want := range map[string]string{
+			"todo:shared": `"right"`, "todo:a": `"a"`, "todo:b": `"b"`, "todo:c": `"c"`, "todo:delete": "",
+		} {
+			if got := string(state.Tasks[key].Value); got != want {
+				t.Fatalf("%s = %s, want %s", key, got, want)
+			}
+		}
+	}
+}
+
+func TestReplicaReorderDoesNotDiscardConcurrentContentEdit(t *testing.T) {
+	left := replica{Device: "desktop"}
+	left.capture(map[string]json.RawMessage{"todo:task": json.RawMessage(`{"id":"task","title":"base","updatedAt":100,"position":1}`)}, 100)
+	right := left
+	right.Device = "phone"
+	edit := json.RawMessage(`{"id":"task","title":"edited","updatedAt":200,"position":1}`)
+	left.capture(map[string]json.RawMessage{"todo:task": edit}, 200)
+	right.capture(map[string]json.RawMessage{"todo:task": json.RawMessage(`{"id":"task","title":"base","updatedAt":100,"position":4}`)}, 300)
+	left.merge(right)
+	if got := string(left.Tasks["todo:task"].Value); got != string(edit) {
+		t.Fatalf("unrelated reordering replaced the task edit: %s", got)
 	}
 }
 

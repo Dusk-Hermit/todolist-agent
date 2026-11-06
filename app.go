@@ -586,7 +586,9 @@ func (a *App) moveTodo(id, priority, beforeID string, after bool, actor string) 
 		moved.Priority = normalizePriority(priority)
 	}
 	now := time.Now().UnixMilli()
-	moved.UpdatedAt = now
+	if moved.Priority != before.Priority {
+		moved.UpdatedAt = now
+	}
 
 	siblings := make([]Todo, 0, len(a.state.Todos))
 	for _, t := range a.state.Todos {

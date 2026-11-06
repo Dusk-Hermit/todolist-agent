@@ -171,7 +171,7 @@ func chooseDSH(peers []lanPeer, preferred string) *lanPeer {
 }
 
 func (p lanPeer) canDispatch() bool {
-	return p.Platform == "windows" && p.Dispatch && p.DSHAddress != "" &&
+	return !p.NeedsUpgrade && p.Platform == "windows" && p.Dispatch && p.DSHAddress != "" &&
 		p.DSH.Connected && p.DSH.SessionID != ""
 }
 

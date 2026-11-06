@@ -3,12 +3,38 @@ package main
 import (
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+func TestLANRejectsLegacyReplicaExchangeInBothDirections(t *testing.T) {
+	s := lanService{}
+	for _, handler := range []http.HandlerFunc{s.handleSync, s.handleApply} {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest("POST", "/", strings.NewReader("{}")))
+		if w.Code != http.StatusUpgradeRequired {
+			t.Fatalf("old peer got %d, want upgrade required", w.Code)
+		}
+	}
+	old := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/sync") {
+			t.Errorf("sent a mutation to the old device: %s", r.URL.Path)
+		}
+		writeJSON(w, http.StatusOK, replicaDelta{})
+	}))
+	defer old.Close()
+	s.app, s.ctx, s.client = isolatedApp(t), t.Context(), old.Client()
+	err := s.exchange(lanPeer{Address: strings.TrimPrefix(old.URL, "https://")})
+	if !errors.Is(err, errLANMergeUpgrade) {
+		t.Fatalf("old server: got %v, want upgrade required", err)
+	}
+}
 
 func isolatedApp(t *testing.T) *App {
 	t.Helper()

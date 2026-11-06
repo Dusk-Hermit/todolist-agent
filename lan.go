@@ -28,31 +28,36 @@ import (
 const lanPort = 17891
 const lanBodyLimit = 32 << 20
 const lanPrefix = "/todolist/v1"
+const lanMergeHeader = "TodoList-Merge-Version"
+const lanMergeVersion = "2"
 
 var (
 	errLANPeerUnreachable = errors.New("暂时无法连接已发现的设备。请在对端打开 TodoList 并点刷新。")
 	errLANPeerPulling     = errors.New("已收到对端的同步请求。可在对端查看同步结果。")
 	errLANBatchQueued     = errors.New("已收到待发消息，等待电脑重新连接 DSH。")
+	errLANMergeUpgrade    = errors.New("请将同步设备升级到 TodoList Agent 0.4.8 或更高版本。")
 )
 
 type lanInfo struct {
-	ID       string    `json:"id"`
-	Name     string    `json:"name"`
-	Platform string    `json:"platform"`
-	DSH      DSHStatus `json:"dsh"`
-	Paused   bool      `json:"paused"`
-	Dispatch bool      `json:"dispatch"`
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Platform     string    `json:"platform"`
+	DSH          DSHStatus `json:"dsh"`
+	Paused       bool      `json:"paused"`
+	Dispatch     bool      `json:"dispatch"`
+	MergeVersion string    `json:"mergeVersion,omitempty"`
 }
 
 type lanPeer struct {
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
-	Platform   string    `json:"platform"`
-	Address    string    `json:"address"`
-	DSHAddress string    `json:"dshAddress,omitempty"`
-	DSH        DSHStatus `json:"-"`
-	Paused     bool      `json:"paused"`
-	Dispatch   bool      `json:"dispatch"`
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Platform     string    `json:"platform"`
+	Address      string    `json:"address"`
+	DSHAddress   string    `json:"dshAddress,omitempty"`
+	DSH          DSHStatus `json:"-"`
+	Paused       bool      `json:"paused"`
+	Dispatch     bool      `json:"dispatch"`
+	NeedsUpgrade bool      `json:"needsUpgrade,omitempty"`
 }
 
 type lanService struct {
@@ -211,6 +216,7 @@ func (s *lanService) requestContext(ctx context.Context, method, address, route 
 	}
 	r.Header.Set("Authorization", "Bearer "+s.code)
 	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set(lanMergeHeader, lanMergeVersion)
 	resp, err := s.client.Do(r)
 	if err != nil {
 		return err
@@ -218,6 +224,10 @@ func (s *lanService) requestContext(ctx context.Context, method, address, route 
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusLocked {
 		return errBatchRunning
+	}
+	if resp.StatusCode == http.StatusUpgradeRequired ||
+		(resp.StatusCode == http.StatusOK && (route == "/sync" || route == "/apply") && resp.Header.Get(lanMergeHeader) != lanMergeVersion) {
+		return errLANMergeUpgrade
 	}
 	if resp.StatusCode != http.StatusOK {
 		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
@@ -240,7 +250,7 @@ func (s *lanService) handleInfo(w http.ResponseWriter, _ *http.Request) {
 	paused := s.app.batchPausedLocked()
 	s.app.mu.Unlock()
 	writeJSON(w, http.StatusOK, lanInfo{ID: s.id, Name: s.name, Platform: platformName, DSH: status,
-		Paused: paused, Dispatch: s.app.dsh != nil})
+		Paused: paused, Dispatch: s.app.dsh != nil, MergeVersion: lanMergeVersion})
 }
 
 func readLAN(w http.ResponseWriter, r *http.Request, dst any) bool {
@@ -251,7 +261,19 @@ func readLAN(w http.ResponseWriter, r *http.Request, dst any) bool {
 	return true
 }
 
+func requireMergeVersion(w http.ResponseWriter, r *http.Request) bool {
+	if r.Header.Get(lanMergeHeader) != lanMergeVersion {
+		http.Error(w, errLANMergeUpgrade.Error(), http.StatusUpgradeRequired)
+		return false
+	}
+	w.Header().Set(lanMergeHeader, lanMergeVersion)
+	return true
+}
+
 func (s *lanService) handleSync(w http.ResponseWriter, r *http.Request) {
+	if !requireMergeVersion(w, r) {
+		return
+	}
 	var known replicaManifest
 	if !readLAN(w, r, &known) {
 		return
@@ -270,6 +292,9 @@ func (s *lanService) handleSync(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *lanService) handleApply(w http.ResponseWriter, r *http.Request) {
+	if !requireMergeVersion(w, r) {
+		return
+	}
 	var delta replicaDelta
 	if !readLAN(w, r, &delta) {
 		return
@@ -404,7 +429,8 @@ func (s *lanService) probePeers(addresses map[string]bool) ([]lanPeer, error) {
 		addr := addrs[i]
 		peers = append(peers, lanPeer{ID: info.ID, Name: info.Name, Platform: info.Platform,
 			Address: addr, DSH: info.DSH, Paused: info.Paused, Dispatch: info.Dispatch,
-			DSHAddress: peerDSHAddress(addr, info.DSH.BaseURL)})
+			NeedsUpgrade: info.MergeVersion != lanMergeVersion,
+			DSHAddress:   peerDSHAddress(addr, info.DSH.BaseURL)})
 	}
 	if failed && len(peers) == 0 {
 		return peers, errLANPeerUnreachable
@@ -413,6 +439,9 @@ func (s *lanService) probePeers(addresses map[string]bool) ([]lanPeer, error) {
 }
 
 func (s *lanService) exchange(peer lanPeer) error {
+	if peer.NeedsUpgrade {
+		return errLANMergeUpgrade
+	}
 	local, err := s.app.replicaForExchange()
 	if err != nil {
 		return err

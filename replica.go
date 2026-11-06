@@ -56,7 +56,7 @@ func (s replicaStamp) newer(other replicaStamp) bool {
 type replicaRecord struct {
 	Clock vector       `json:"clock"`
 	Stamp replicaStamp `json:"stamp"`
-	// An absent value is a durable deletion, including deletions from conflict resolution.
+	// An absent value is a durable deletion.
 	Value json.RawMessage `json:"value,omitempty"`
 }
 
@@ -101,14 +101,13 @@ func (r *replica) capture(values map[string]json.RawMessage, now int64) bool {
 	return true
 }
 
-// Independent records merge causally. A conflict on a task (including a
-// delete/edit conflict) selects the newer entire list. Versioning every
-// winning value and discarded ID prevents a stale device from undoing it.
+// Merge each record independently. Causal successors win before timestamps
+// are considered, and unrelated records keep their own versions.
 func (r *replica) merge(other replica) bool {
 	records := make(map[string]replicaRecord, len(r.Tasks)+len(other.Tasks))
 	maps.Copy(records, r.Tasks)
 	clock := r.Clock.join(other.Clock)
-	conflict, changed := false, false
+	changed := false
 	for key, remote := range other.Tasks {
 		local, exists := records[key]
 		order := local.Clock.compare(remote.Clock)
@@ -121,49 +120,46 @@ func (r *replica) merge(other replica) bool {
 			local.Stamp == remote.Stamp && bytes.Equal(local.Value, remote.Value)) {
 			continue
 		}
-		if listRecord(key) && !bytes.Equal(local.Value, remote.Value) {
-			conflict = true
-		}
 		picked := local
-		if remote.Stamp.newer(local.Stamp) ||
-			(remote.Stamp == local.Stamp && bytes.Compare(remote.Value, local.Value) > 0) {
+		if remoteRecordWins(key, local, remote) {
 			picked = remote
 		}
 		picked.Clock = local.Clock.join(remote.Clock)
 		records[key] = picked
 		changed = true
 	}
-	winner := *r
+	list := r.List
 	if other.List.newer(r.List) {
-		winner = other
+		list = other.List
 	}
-	if conflict {
-		if r.List == other.List && listKey(other.Tasks) > listKey(r.Tasks) {
-			winner = other
-		}
-		for key, record := range records {
-			value := winner.Tasks[key].Value
-			if listRecord(key) && !bytes.Equal(record.Value, value) {
-				records[key] = replicaRecord{Clock: clock, Stamp: winner.List, Value: value}
-			}
-		}
-	}
-	changed = changed || winner.List != r.List || !maps.Equal(clock, r.Clock)
+	changed = changed || list != r.List || !maps.Equal(clock, r.Clock)
 	if changed {
-		r.Clock, r.List, r.Tasks = clock, winner.List, records
+		r.Clock, r.List, r.Tasks = clock, list, records
 	}
 	return changed
 }
 
-func listKey(records map[string]replicaRecord) string {
-	values := make(map[string]json.RawMessage)
-	for key, record := range records {
-		if listRecord(key) && len(record.Value) != 0 {
-			values[key] = record.Value
+func remoteRecordWins(key string, local, remote replicaRecord) bool {
+	if strings.HasPrefix(key, "todo:") {
+		leftAt, rightAt := taskChangeTime(local), taskChangeTime(remote)
+		if leftAt != rightAt {
+			return rightAt > leftAt
+		}
+		if (len(local.Value) == 0) != (len(remote.Value) == 0) {
+			return len(remote.Value) == 0
 		}
 	}
-	data, _ := json.Marshal(values)
-	return string(data)
+	return remote.Stamp.newer(local.Stamp) ||
+		(remote.Stamp == local.Stamp && bytes.Compare(remote.Value, local.Value) > 0)
+}
+
+func taskChangeTime(record replicaRecord) int64 {
+	// An order-only move can change Position without editing the task.
+	var task Todo
+	if len(record.Value) != 0 && json.Unmarshal(record.Value, &task) == nil && task.UpdatedAt > 0 {
+		return task.UpdatedAt
+	}
+	return record.Stamp.At
 }
 
 type replicaManifest struct {
