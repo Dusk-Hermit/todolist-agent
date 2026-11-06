@@ -182,7 +182,7 @@ Windows 和 Android 启动时自动检查 GitHub Release，也可以在「设置
 1. 环境变量 `DSH_WEB_URL`；
 2. 上次成功使用的地址；
 3. `http://127.0.0.1:13848`；
-4. 在 `127.0.0.1:13800–13920` 范围内扫描，并用 `session/list` 验证。
+4. 枚举 Windows 当前的回环监听端口（包括 DSH Desktop 的临时端口），并用 `session/list` 验证。
 
 认证时，应用读取 `%USERPROFILE%\.dsh\.credentials.yaml` 中 `client-connection/browser-session` 的密钥，按 DSH 自己的格式签出短期会话 Cookie。密钥只在本机使用，不会写入任务数据。
 

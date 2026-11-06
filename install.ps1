@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   安装 TodoList Agent 到当前用户目录，并创建开始菜单快捷方式。
 .DESCRIPTION

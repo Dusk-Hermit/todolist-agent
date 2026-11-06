@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   构建 TodoList Agent 单文件可执行程序与发布包。
 .DESCRIPTION

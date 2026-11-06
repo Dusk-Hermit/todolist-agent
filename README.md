@@ -180,7 +180,7 @@ The app tries DSH addresses in this order:
 1. `DSH_WEB_URL`, if set;
 2. the last address that worked;
 3. `http://127.0.0.1:13848`;
-4. a local port scan in `127.0.0.1:13800–13920`, validated with `session/list`.
+4. the loopback TCP listeners currently reported by Windows, including DSH Desktop's ephemeral port, validated with `session/list`.
 
 To authenticate, it reads the `client-connection/browser-session` secret from `%USERPROFILE%\.dsh\.credentials.yaml` and mints the same short-lived session cookie DSH uses for its own Web UI. The secret never leaves the machine and is not written into task data.
 

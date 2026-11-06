@@ -15,7 +15,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -359,7 +361,7 @@ func (c *DSHClient) connect(ctx context.Context) error {
 	scanAge := time.Since(c.lastScan)
 	c.lastScan = time.Now()
 	c.mu.Unlock()
-	if scanAge > 30*time.Second {
+	if scanAge > 10*time.Second {
 		if cand := c.scan(ctx, secret); cand != "" {
 			items, err := c.listAt(ctx, cand, secret, 5*time.Second)
 			if err == nil {
@@ -849,7 +851,25 @@ func (c *DSHClient) scan(ctx context.Context, secret []byte) string {
 	var once sync.Once
 	sem := make(chan struct{}, 24)
 	var wg sync.WaitGroup
+	ports := make([]int, 0, 180)
+	seen := make(map[int]bool)
+	addPort := func(p int) {
+		if p <= 0 || p > 65535 || seen[p] {
+			return
+		}
+		seen[p] = true
+		ports = append(ports, p)
+	}
 	for port := 13800; port <= 13920; port++ {
+		addPort(port)
+	}
+	// DSH's desktop host picks an ephemeral loopback port on startup. The old
+	// fixed range missed those instances; enumerate the listeners Windows
+	// already knows about and probe them as well.
+	for _, port := range listeningPorts() {
+		addPort(port)
+	}
+	for _, port := range ports {
 		wg.Add(1)
 		go func(p int) {
 			defer wg.Done()
@@ -893,6 +913,42 @@ func (c *DSHClient) scan(ctx context.Context, secret []byte) string {
 	case <-ctx.Done():
 		return ""
 	}
+}
+
+// listeningPorts returns loopback TCP ports in LISTEN state. netstat is used
+// instead of a fixed port range because DSH Desktop allocates a fresh ephemeral
+// port every time it starts.
+func listeningPorts() []int {
+	out, err := exec.Command("netstat", "-ano", "-p", "tcp").Output()
+	if err != nil {
+		return nil
+	}
+	seen := make(map[int]bool)
+	ports := make([]int, 0, 64)
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 4 || !strings.EqualFold(fields[0], "TCP") {
+			continue
+		}
+		local, remote := fields[1], fields[2]
+		if !strings.HasSuffix(remote, ":0") {
+			continue
+		}
+		host, portText, err := net.SplitHostPort(local)
+		if err != nil {
+			continue
+		}
+		if host != "127.0.0.1" && host != "0.0.0.0" && host != "::" && host != "::1" {
+			continue
+		}
+		port, err := strconv.Atoi(portText)
+		if err != nil || port < 1024 || seen[port] {
+			continue
+		}
+		seen[port] = true
+		ports = append(ports, port)
+	}
+	return ports
 }
 
 func (c *DSHClient) SendPrompt(text string, onboarding bool) (string, error) {
