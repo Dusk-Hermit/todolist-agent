@@ -62,8 +62,8 @@ A task can have subtasks when the work genuinely has steps, for example “prepa
 
 ### Focus, priority bands, and ordering
 
-- Exactly zero or one top-level task can be focused at a time.
-- A focused task gets the full-card highlight, a rose border, and a sage-green bold title.
+- The list can focus one task or subtask at a time.
+- The focused item has a rose border and a bold sage-green title.
 - Tasks are ordered into **Pinned · Long-term**, **High**, **Normal**, and **Low** bands.
 - Dragging a task into another band changes its priority; dragging inside a band changes its order.
 - Tasks DSH extracts from everyday input go at the end of their priority band. DSH can use `placement: "first"` when the user asks to put a task first.

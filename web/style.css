@@ -898,6 +898,7 @@ svg {
 }
 
 .todo-actions .icon-btn.focus.active,
+.sactions .icon-btn.focus.active,
 .crow-actions .icon-btn.focus.active {
   color: var(--accent);
   background: rgba(185, 124, 136, 0.12);
@@ -998,6 +999,17 @@ svg {
 .subtask:hover {
   background: rgba(var(--ink), 0.03);
   border-color: var(--line);
+}
+
+.subtask.focused {
+  border-color: rgba(185, 124, 136, 0.38);
+  background: linear-gradient(90deg, rgba(216, 167, 174, 0.16), rgba(143, 169, 149, 0.06)), var(--surface);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.subtask.focused .stitle {
+  color: #5f8069;
+  font-weight: 700;
 }
 
 .subtask.done,
@@ -2338,13 +2350,19 @@ kbd {
 .crow.child {
   margin-left: 18px;
   min-height: 30px;
-  border-left: 2px solid var(--line);
   border-radius: 0 7px 7px 0;
+}
+
+.crow.child:not(.focused) {
+  border-left: 2px solid var(--line);
   background: rgba(var(--ink), 0.012);
 }
 
 .crow.child .crow-title {
   font-size: 12.5px;
+}
+
+.crow.child:not(.focused) .crow-title {
   color: var(--text-2);
 }
 

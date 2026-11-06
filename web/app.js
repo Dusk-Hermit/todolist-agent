@@ -425,11 +425,17 @@
     });
   }
 
+  function focusButtonHTML(focused) {
+    const label = focused ? "取消专注" : "专注此项";
+    return `<button class="icon-btn focus ${focused ? "active" : ""}" data-act="focus" title="${label}" aria-label="${label}" aria-pressed="${focused}"><svg class="icon"><use href="#i-target"/></svg></button>`;
+  }
+
   function subtaskRowHTML(t) {
     const done = t.status === "done";
     const dropped = t.status === "dropped";
     const doing = t.status === "doing";
-    return `<div class="subtask prio-${priorityKey(t)} ${done ? "done" : ""} ${doing ? "doing" : ""} ${dropped ? "dropped" : ""}" data-id="${esc(t.id)}">
+    const focused = !!(S.data && S.data.focusId === t.id);
+    return `<div class="subtask prio-${priorityKey(t)} ${focused ? "focused" : ""} ${done ? "done" : ""} ${doing ? "doing" : ""} ${dropped ? "dropped" : ""}" data-id="${esc(t.id)}">
       <button class="scheck" data-act="toggle" aria-label="${done || dropped ? "重新打开" : "完成子任务"}" title="${done || dropped ? "重新打开" : "完成子任务"}">
         <svg class="icon"><use href="#i-check"/></svg>
       </button>
@@ -442,6 +448,7 @@
         <span>${esc(relTime(t.updatedAt || t.createdAt))}</span>
       </div>
       <div class="sactions">
+        ${done || dropped ? "" : focusButtonHTML(focused)}
         <button class="icon-btn" data-act="edit" title="编辑" aria-label="编辑"><svg class="icon"><use href="#i-edit"/></svg></button>
         ${dropped ? "" : '<button class="icon-btn" data-act="drop" title="丢弃" aria-label="丢弃"><svg class="icon"><use href="#i-drop"/></svg></button>'}
         <button class="icon-btn del" data-act="del" title="删除" aria-label="删除"><svg class="icon"><use href="#i-trash"/></svg></button>
@@ -489,7 +496,7 @@
         ${subtasks}
       </div>
       <div class="todo-actions">
-        ${done || dropped ? "" : `<button class="icon-btn focus ${focused ? "active" : ""}" data-act="focus" title="${focused ? "取消专注" : "专注此项"}" aria-label="${focused ? "取消专注" : "专注此项"}"><svg class="icon"><use href="#i-target"/></svg></button>`}
+        ${done || dropped ? "" : focusButtonHTML(focused)}
         <button class="icon-btn" data-act="edit" title="编辑" aria-label="编辑"><svg class="icon"><use href="#i-edit"/></svg></button>
         ${done || dropped ? "" : `<button class="icon-btn" data-act="sub-add" data-parent-id="${esc(t.id)}" title="添加子任务" aria-label="添加子任务"><svg class="icon"><use href="#i-plus"/></svg></button>`}
         ${dropped ? "" : '<button class="icon-btn" data-act="drop" title="丢弃" aria-label="丢弃"><svg class="icon"><use href="#i-drop"/></svg></button>'}
@@ -503,7 +510,7 @@
     const dropped = t.status === "dropped";
     const doing = t.status === "doing";
     const checked = done || dropped;
-    const focused = !isChild && !!(S.data && S.data.focusId === t.id);
+    const focused = !!(S.data && S.data.focusId === t.id);
     const children = isChild ? [] : childrenOf(t.id);
     const sub = children.length ? `<span>· ${children.filter((c) => c.status === "done" || c.status === "dropped").length}/${children.length}</span>` : "";
     return `<div class="crow prio-${priorityKey(t)} ${focused ? "focused" : ""} ${isChild ? "child" : ""} ${done ? "done" : ""} ${doing ? "doing" : ""} ${dropped ? "dropped" : ""}" data-id="${esc(t.id)}" draggable="${!isChild && t.status === "todo" ? "true" : "false"}">
@@ -520,7 +527,7 @@
         </div>
       </div>
       <div class="crow-actions">
-        ${isChild || done || dropped ? "" : `<button class="icon-btn focus ${focused ? "active" : ""}" data-act="focus" title="${focused ? "取消专注" : "专注此项"}" aria-label="${focused ? "取消专注" : "专注此项"}"><svg class="icon"><use href="#i-target"/></svg></button>`}
+        ${done || dropped ? "" : focusButtonHTML(focused)}
         <button class="icon-btn" data-act="edit" title="编辑" aria-label="编辑"><svg class="icon"><use href="#i-edit"/></svg></button>
         ${isChild || done || dropped ? "" : `<button class="icon-btn" data-act="sub-add" data-parent-id="${esc(t.id)}" title="添加子任务" aria-label="添加子任务"><svg class="icon"><use href="#i-plus"/></svg></button>`}
         ${dropped ? "" : '<button class="icon-btn" data-act="drop" title="丢弃" aria-label="丢弃"><svg class="icon"><use href="#i-drop"/></svg></button>'}
@@ -729,6 +736,7 @@
     const sig = [
       compact ? "compact" : "cards",
       S.filter,
+      S.data && S.data.focusId,
       JSON.stringify(S.collapsedGroups),
       allTodos().map((t) => [t.id, t.parentId, t.status, t.title, t.notes, t.priority, t.updatedAt, t.completedAt, t.droppedAt, t.dropReason, t.position].join("\u0001")).join("\u0002"),
     ].join("\u0003");

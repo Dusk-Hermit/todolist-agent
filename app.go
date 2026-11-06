@@ -752,7 +752,7 @@ func (a *App) updateTodo(id string, patch TodoPatch, actor string) (Todo, error)
 	}
 	after.UpdatedAt = time.Now().UnixMilli()
 	a.state.Todos[idx] = after
-	if (after.Status == statusDone || after.Status == statusDropped) && a.state.FocusID == after.ID {
+	if (after.Status == statusDone || after.Status == statusDropped) && a.state.validateFocus(a.state.FocusID) != nil {
 		a.state.FocusID = ""
 	}
 	kind := "todo.update"
@@ -803,32 +803,36 @@ func (a *App) dropTodo(id, reason, actor string) (Todo, error) {
 	return a.updateTodo(id, patch, actor)
 }
 
-// setFocus makes one task the current focus. There is at most one globally;
-// an empty id clears focus. The focused task is intentionally not reordered.
+func (st *persistedState) validateFocus(id string) error {
+	if id == "" {
+		return nil
+	}
+	for _, task := range st.Todos {
+		if task.ID != id {
+			continue
+		}
+		if task.Status == statusDone || task.Status == statusDropped {
+			return fmt.Errorf("只能专注未完成或未丢弃的任务")
+		}
+		if task.ParentID != "" {
+			for _, parent := range st.Todos {
+				if parent.ID == task.ParentID && (parent.Status == statusDone || parent.Status == statusDropped) {
+					return fmt.Errorf("父任务已完成或丢弃，请先重新打开父任务")
+				}
+			}
+		}
+		return nil
+	}
+	return fmt.Errorf("任务不存在")
+}
+
+// setFocus makes one task the current focus. An empty id clears it.
 func (a *App) setFocus(id, actor string) (string, error) {
 	a.mu.Lock()
 	id = strings.TrimSpace(id)
-	if id != "" {
-		found := false
-		for i := range a.state.Todos {
-			if a.state.Todos[i].ID != id {
-				continue
-			}
-			found = true
-			if a.state.Todos[i].ParentID != "" {
-				a.mu.Unlock()
-				return "", fmt.Errorf("只能专注顶层任务")
-			}
-			if a.state.Todos[i].Status == statusDone || a.state.Todos[i].Status == statusDropped {
-				a.mu.Unlock()
-				return "", fmt.Errorf("只能专注未完成或未丢弃的任务")
-			}
-			break
-		}
-		if !found {
-			a.mu.Unlock()
-			return "", fmt.Errorf("任务不存在")
-		}
+	if err := a.state.validateFocus(id); err != nil {
+		a.mu.Unlock()
+		return "", err
 	}
 	a.state.FocusID = id
 	if a.state.Replica.Device != "" {

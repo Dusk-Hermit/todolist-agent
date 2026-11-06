@@ -121,18 +121,8 @@ func normalizeState(st *persistedState) {
 			t.DroppedAt = t.UpdatedAt
 		}
 	}
-	if st.FocusID != "" {
-		valid := false
-		for i := range st.Todos {
-			t := st.Todos[i]
-			if t.ID == st.FocusID && t.ParentID == "" && t.Status != statusDone && t.Status != statusDropped {
-				valid = true
-				break
-			}
-		}
-		if !valid {
-			st.FocusID = ""
-		}
+	if st.validateFocus(st.FocusID) != nil {
+		st.FocusID = ""
 	}
 	for i := range st.Messages {
 		m := &st.Messages[i]
