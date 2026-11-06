@@ -1206,7 +1206,8 @@
       installing: "正在安装，请按系统提示操作…",
       checked: available ? `发现新版本 ${available}` : "已是最新版本",
     };
-    $("updateStatus").textContent = view.error || status[view.phase] || "";
+    const retry = view.retryAt > Date.now() ? `。可在 ${new Date(view.retryAt).toLocaleTimeString()} 后重试` : "";
+    $("updateStatus").textContent = view.error ? view.error + retry : status[view.phase] || "";
     $("updateBanner").classList.toggle("hidden", !available);
     $("updateBannerText").textContent = view.error || (busy ? status[view.phase] : `发现新版本 ${available}`);
     $("updateInstall").classList.toggle("hidden", !available);
@@ -1625,6 +1626,7 @@
     $("historyScrollTop").addEventListener("click", () => { $("historyList").scrollTop = 0; });
     $("settingsBtn").addEventListener("click", openSettings);
     $("updateCheck").addEventListener("click", () => call("todo_updateCheck").catch((e) => showToast("error", errText(e))));
+    $("updateReleasePage").addEventListener("click", () => call("todo_openUpdatePage").catch((e) => showToast("error", errText(e))));
     $("updateInstall").addEventListener("click", installUpdate);
     $("updateBannerInstall").addEventListener("click", installUpdate);
     $("updateAuto").addEventListener("change", async (e) => {

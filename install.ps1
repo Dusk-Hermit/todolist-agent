@@ -79,7 +79,7 @@ $uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\TodoL
 New-Item -Path $uninstallKey -Force | Out-Null
 $sizeKB = [int]((Get-Item $destExe).Length / 1KB) + 64
 Set-ItemProperty -Path $uninstallKey -Name "DisplayName" -Value "TodoList Agent"
-Set-ItemProperty -Path $uninstallKey -Name "DisplayVersion" -Value "0.4.8"
+Set-ItemProperty -Path $uninstallKey -Name "DisplayVersion" -Value "0.4.9"
 Set-ItemProperty -Path $uninstallKey -Name "Publisher" -Value "TodoList Agent"
 Set-ItemProperty -Path $uninstallKey -Name "InstallLocation" -Value $dest
 Set-ItemProperty -Path $uninstallKey -Name "DisplayIcon" -Value $iconLocation

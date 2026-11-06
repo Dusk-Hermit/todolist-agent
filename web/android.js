@@ -1,6 +1,7 @@
 (() => {
   "use strict";
   document.documentElement.classList.add("android");
+  window.todo_openUpdatePage = () => TodoNative.openUpdatePage();
   const methods = [
     "ready", "getState", "addTodo", "updateTodo", "setTodoStatus", "dropTodo",
     "deleteTodo", "moveTodo", "setFocus", "journal", "sendInput", "savePrefs",

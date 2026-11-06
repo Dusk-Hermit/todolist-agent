@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,13 +19,17 @@ import (
 )
 
 const updateRepo = "Dusk-Hermit/todolist-agent"
+const updateReleaseRoot = "https://github.com/" + updateRepo + "/releases"
+const updateReleasePage = updateReleaseRoot + "/latest"
+const updateManifestURL = updateReleasePage + "/download/TodoListAgent-update.json"
 const updateAPI = "https://api.github.com/repos/" + updateRepo + "/releases?per_page=30"
 const maxUpdateSize = 128 << 20
 
 type githubRelease struct {
-	Tag    string         `json:"tag_name"`
-	Draft  bool           `json:"draft"`
-	Assets []releaseAsset `json:"assets"`
+	Tag        string         `json:"tag_name"`
+	Draft      bool           `json:"draft"`
+	Prerelease bool           `json:"prerelease"`
+	Assets     []releaseAsset `json:"assets"`
 }
 
 type releaseAsset struct {
@@ -45,6 +50,7 @@ type updateView struct {
 	Available string `json:"available,omitempty"`
 	Phase     string `json:"phase"`
 	Error     string `json:"error,omitempty"`
+	RetryAt   int64  `json:"retryAt,omitempty"`
 	Auto      bool   `json:"auto"`
 }
 
@@ -54,6 +60,7 @@ type updater struct {
 	phase     string
 	failure   string
 	checkedAt time.Time
+	retryAt   time.Time
 	stopAuto  context.CancelFunc
 }
 
@@ -81,11 +88,11 @@ func selectUpdate(releases []githubRelease, current, name string) *updateOffer {
 	var offer *updateOffer
 	for _, release := range releases {
 		v, valid := releaseVersion(release.Tag)
-		if release.Draft || !valid || !strings.HasPrefix(release.Tag, "v") || slices.Compare(v, best) <= 0 {
+		if release.Draft || release.Prerelease || !valid || !strings.HasPrefix(release.Tag, "v") || slices.Compare(v, best) <= 0 {
 			continue
 		}
 		for _, asset := range release.Assets {
-			expected := "https://github.com/" + updateRepo + "/releases/download/" + release.Tag + "/" + name
+			expected := updateReleaseRoot + "/download/" + release.Tag + "/" + name
 			if asset.Name != name || asset.URL != expected || asset.Size <= 0 || asset.Size > maxUpdateSize {
 				continue
 			}
@@ -123,7 +130,61 @@ func updateClient() *http.Client {
 	}}
 }
 
-func githubUpdates(ctx context.Context, client *http.Client) ([]githubRelease, error) {
+func githubUpdates(ctx context.Context, client *http.Client, apiRetryAt time.Time) ([]githubRelease, error) {
+	attempt, cancel := context.WithTimeout(ctx, 7*time.Second)
+	release, directErr := directRelease(attempt, client)
+	cancel()
+	if directErr == nil {
+		return []githubRelease{release}, nil
+	}
+	if apiRetryAt.After(time.Now()) {
+		return nil, &githubRateLimit{retryAt: apiRetryAt}
+	}
+	releases, err := githubAPIUpdates(ctx, client)
+	if err != nil {
+		return nil, fmt.Errorf("Release 直连不可用（%v），%w", directErr, err)
+	}
+	return releases, nil
+}
+
+func directRelease(ctx context.Context, client *http.Client) (githubRelease, error) {
+	var release githubRelease
+	r, err := http.NewRequestWithContext(ctx, http.MethodGet, updateManifestURL, nil)
+	if err != nil {
+		return release, err
+	}
+	response, err := client.Do(r)
+	if err != nil {
+		return release, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return release, fmt.Errorf("HTTP %d", response.StatusCode)
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 64<<10)).Decode(&release); err != nil {
+		return release, fmt.Errorf("发布清单格式无效")
+	}
+	if _, valid := releaseVersion(release.Tag); !valid || !strings.HasPrefix(release.Tag, "v") ||
+		release.Draft || release.Prerelease || len(release.Assets) == 0 {
+		return release, fmt.Errorf("发布清单版本无效")
+	}
+	for i := range release.Assets {
+		asset := &release.Assets[i]
+		if _, err := assetHash(asset.Digest); err != nil || asset.Size <= 0 || asset.Size > maxUpdateSize ||
+			asset.Name == "" || strings.ContainsAny(asset.Name, "/\\?#") {
+			return release, fmt.Errorf("发布清单中的安装包信息无效")
+		}
+		asset.URL = updateReleaseRoot + "/download/" + release.Tag + "/" + asset.Name
+		asset.ID = 0
+	}
+	return release, nil
+}
+
+type githubRateLimit struct{ retryAt time.Time }
+
+func (e *githubRateLimit) Error() string { return "GitHub API 暂时限流" }
+
+func githubAPIUpdates(ctx context.Context, client *http.Client) ([]githubRelease, error) {
 	r, err := http.NewRequestWithContext(ctx, "GET", updateAPI, nil)
 	if err != nil {
 		return nil, err
@@ -135,28 +196,49 @@ func githubUpdates(ctx context.Context, client *http.Client) ([]githubRelease, e
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GitHub 返回 HTTP %d", response.StatusCode)
+		return nil, githubAPIStatusError(response.StatusCode, response.Header, time.Now())
 	}
 	var releases []githubRelease
 	err = json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(&releases)
 	return releases, err
 }
 
-func downloadUpdate(ctx context.Context, client *http.Client, asset releaseAsset, destination string) error {
-	if asset.ID > 0 {
-		apiURL := "https://api.github.com/repos/" + updateRepo + "/releases/assets/" + strconv.FormatInt(asset.ID, 10)
-		attempt, cancel := context.WithTimeout(ctx, 2*time.Minute)
-		err := downloadUpdateFrom(attempt, client, asset, apiURL, destination)
-		cancel()
-		if err == nil {
-			return nil
-		}
-		// Public release links are a fallback if the API is rate-limited.
-		if ctx.Err() != nil {
-			return err
+func githubAPIStatusError(status int, headers http.Header, now time.Time) error {
+	retry := headers.Get("Retry-After")
+	exhausted := headers.Get("X-RateLimit-Remaining") == "0"
+	if status != http.StatusTooManyRequests && (status != http.StatusForbidden || (!exhausted && retry == "")) {
+		return fmt.Errorf("GitHub API 返回 HTTP %d", status)
+	}
+	retryAt, _ := http.ParseTime(retry)
+	if seconds, err := strconv.ParseInt(retry, 10, 32); err == nil && seconds > 0 {
+		retryAt = now.Add(time.Duration(seconds) * time.Second)
+	}
+	if reset, err := strconv.ParseInt(headers.Get("X-RateLimit-Reset"), 10, 64); exhausted && err == nil {
+		if resetAt := time.Unix(reset, 0); resetAt.After(retryAt) {
+			retryAt = resetAt
 		}
 	}
-	return downloadUpdateFrom(ctx, client, asset, asset.URL, destination)
+	if !retryAt.After(now) {
+		retryAt = now.Add(time.Minute)
+	}
+	return &githubRateLimit{retryAt: retryAt}
+}
+
+func downloadUpdate(ctx context.Context, client *http.Client, asset releaseAsset, destination string) error {
+	if asset.ID <= 0 {
+		return downloadUpdateFrom(ctx, client, asset, asset.URL, destination)
+	}
+	attempt, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	err := downloadUpdateFrom(attempt, client, asset, asset.URL, destination)
+	cancel()
+	if err == nil || ctx.Err() != nil {
+		return err
+	}
+	apiURL := "https://api.github.com/repos/" + updateRepo + "/releases/assets/" + strconv.FormatInt(asset.ID, 10)
+	if apiErr := downloadUpdateFrom(ctx, client, asset, apiURL, destination); apiErr != nil {
+		return fmt.Errorf("Release 直连下载失败（%v），备用下载失败（%v）", err, apiErr)
+	}
+	return nil
 }
 
 func downloadUpdateFrom(ctx context.Context, client *http.Client, asset releaseAsset, source, destination string) error {
@@ -211,6 +293,9 @@ func (a *App) bindingUpdateState() updateView {
 	a.updates.mu.Lock()
 	defer a.updates.mu.Unlock()
 	view := updateView{Current: appVersion, Phase: a.updates.phase, Error: a.updates.failure, Auto: auto}
+	if a.updates.retryAt.After(time.Now()) {
+		view.RetryAt = a.updates.retryAt.UnixMilli()
+	}
 	if a.updates.offer != nil {
 		view.Available = a.updates.offer.Version
 	}
@@ -254,29 +339,36 @@ func (a *App) stopUpdateChecks() {
 func (a *App) checkUpdate(manual bool) {
 	u := &a.updates
 	u.mu.Lock()
+	now := time.Now()
 	interval := 6 * time.Hour
 	if u.phase == "error" {
 		interval = 15 * time.Minute
 	}
 	if u.phase == "checking" || u.phase == "downloading" || u.phase == "installing" ||
-		(!manual && time.Since(u.checkedAt) < interval) {
+		(!manual && (u.retryAt.After(now) || now.Sub(u.checkedAt) < interval)) {
 		u.mu.Unlock()
 		return
 	}
-	u.checkedAt = time.Now()
+	apiRetryAt := u.retryAt
+	u.checkedAt = now
 	u.phase, u.failure = "checking", ""
 	u.mu.Unlock()
 	a.emit("update", a.bindingUpdateState())
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
-		releases, err := githubUpdates(ctx, updateClient())
+		releases, err := githubUpdates(ctx, updateClient(), apiRetryAt)
 		u.mu.Lock()
+		u.retryAt = time.Time{}
 		if err == nil {
 			u.offer = selectUpdate(releases, appVersion, updateAssetName)
 			u.phase = "checked"
 		} else {
 			u.phase, u.failure = "error", "检查更新失败："+err.Error()
+			var limited *githubRateLimit
+			if errors.As(err, &limited) {
+				u.retryAt = limited.retryAt
+			}
 		}
 		u.mu.Unlock()
 		view := a.bindingUpdateState()

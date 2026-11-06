@@ -155,6 +155,10 @@ TodoList Agent 把这一步搬到了桌面上：
 
 Windows 和 Android 启动时自动检查 GitHub Release，也可以在「设置 → 关于」手动检查。发现新版本后，点击「一键更新」即可下载并校验相应安装包。Windows 完成安装后会重新启动应用。Android 可以在同一处开启自动下载并安装，系统可能要求允许安装来源或确认。0.3.0 及更早版本首次升级需要手动安装新版。
 
+从 0.4.9 起，应用先通过 GitHub 最新正式版的下载直链读取发布清单，直链不可用时再查询 REST API。检查失败时，可在「设置 → 关于 → 打开 GitHub 发布页」的 Assets 里下载 `TodoListAgent-android.apk` 或 `TodoListAgent-Setup-win64.exe` 手动更新。 [最新正式版](https://github.com/Dusk-Hermit/todolist-agent/releases/latest)
+
+发布正式版时，在安装包构建和签名完成后运行 `.\release-manifest.ps1 -Tag <版本标签> -Directory <发布文件目录>`，将生成的 `TodoListAgent-update.json` 和安装包一起上传。
+
 请从本项目的 GitHub Releases 下载安装包。Windows 更新器通过 HTTPS 获取 GitHub 提供的 SHA‑256 摘要并校验安装包，因此依赖仓库发布权限的安全性。目前没有独立的发布者签名校验。
 
 ## 日常使用

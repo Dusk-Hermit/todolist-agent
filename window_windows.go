@@ -76,6 +76,7 @@ func createMainWindow(a *App) webview2.WebView {
 		"todo_updateState":     a.bindingUpdateState,
 		"todo_updateCheck":     a.bindingUpdateCheck,
 		"todo_updateInstall":   a.bindingUpdateInstall,
+		"todo_openUpdatePage":  func() { openURL(updateReleasePage) },
 	}
 	for name, fn := range bindings {
 		if err := w.Bind(name, fn); err != nil {

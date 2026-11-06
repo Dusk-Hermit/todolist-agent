@@ -153,6 +153,10 @@ For multi-PC routing, upgrade Android and every DSH computer to 0.4.0 or later. 
 
 Both apps check GitHub Releases at startup. **Settings → About** also offers a manual check and one-click update. The updater verifies the downloaded package. Windows restarts the app after setup. Android offers optional automatic downloading and installation, subject to the system's permission and confirmation prompts. Install 0.4.0 manually when upgrading from earlier versions.
 
+Starting with 0.4.9, the updater checks the latest stable Release's download link first, and falls back to the GitHub REST API if it cannot read the release manifest. If update checks fail, open **GitHub Releases** from **Settings → About** and download `TodoListAgent-android.apk` or `TodoListAgent-Setup-win64.exe` from the release's assets. [Latest stable release](https://github.com/Dusk-Hermit/todolist-agent/releases/latest)
+
+When publishing a stable release, run `.\release-manifest.ps1 -Tag <tag> -Directory <release-folder>` after building and signing the packages. Upload the generated `TodoListAgent-update.json` alongside the packages.
+
 Download installers from this project's GitHub Releases. The Windows updater checks the package against GitHub's SHA-256 digest over HTTPS. It relies on the security of the repository's release permissions and currently has no independent publisher signature check.
 
 ## Daily use

@@ -314,6 +314,17 @@ public final class MainActivity extends Activity {
     }
 
     private final class Bridge {
+        @JavascriptInterface public void openUpdatePage() {
+            ui.post(() -> {
+                try {
+                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(
+                            "https://github.com/Dusk-Hermit/todolist-agent/releases/latest")));
+                } catch (android.content.ActivityNotFoundException e) {
+                    Toast.makeText(MainActivity.this, "没有可打开发布页的浏览器", Toast.LENGTH_SHORT).show();
+                }
+            });
+        }
+
         @JavascriptInterface public void invoke(int id, String method, String args) {
             WORK.execute(() -> {
                 String reply = fromBytes(nativeInvoke(bytes(method), bytes(args)));
