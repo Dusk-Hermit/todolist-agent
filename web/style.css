@@ -1713,7 +1713,8 @@ svg {
 }
 
 .delete-dialog {
-  width: min(360px, calc(100% - 32px));
+  width: calc(100% - 32px);
+  max-width: 360px;
   margin: auto;
   padding: 0;
 }
@@ -1728,6 +1729,7 @@ svg {
 
 .delete-task-title {
   font-weight: 650;
+  overflow-wrap: break-word;
   overflow-wrap: anywhere;
 }
 

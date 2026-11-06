@@ -228,7 +228,7 @@
     renderSendState();
     updateSetupBanner();
     if (S.settingsOpen) updateSettings(false);
-    if (!wasRunning && st.running && !S.drag?.ghost) {
+    if (!wasRunning && st.running && !(S.drag && S.drag.ghost)) {
       // Scroll the list to the top so the running task is visible.
       const list = $("list");
       if (list) list.scrollTop = 0;
@@ -591,14 +591,14 @@
   }
 
   function dropTargetAt(target, source, y) {
-    const divider = !source.parentId && target?.closest(".prio-divider");
+    const divider = !source.parentId && target && target.closest(".prio-divider");
     if (divider) {
       return { el: divider, priority: divider.dataset.priority, hint: "drop-over" };
     }
-    let row = target?.closest(".todo, .crow, .subtask");
-    if (!source.parentId && row?.classList.contains("subtask")) row = row.closest(".todo");
+    let row = target && target.closest(".todo, .crow, .subtask");
+    if (!source.parentId && row && row.classList.contains("subtask")) row = row.closest(".todo");
     if (!source.parentId) {
-      while (row?.classList.contains("child")) row = row.previousElementSibling;
+      while (row && row.classList.contains("child")) row = row.previousElementSibling;
     }
     const task = row && findTodo(row.dataset.id);
     if (!task || task.id === source.id || task.status !== "todo" ||
@@ -615,11 +615,13 @@
   function updateDropHint(drag, rect) {
     const task = findTodo(drag.id);
     let target = null;
-    if (task?.status === "todo" && insideList(rect, drag.x, drag.y)) {
+    if (task && task.status === "todo" && insideList(rect, drag.x, drag.y)) {
       const hit = document.elementFromPoint(drag.x, drag.y);
       if (hit && drag.list.contains(hit)) target = dropTargetAt(hit, task, drag.y);
     }
-    if (target?.el !== drag.target?.el || target?.hint !== drag.target?.hint) {
+    const previous = drag.target || {};
+    const current = target || {};
+    if (current.el !== previous.el || current.hint !== previous.hint) {
       if (drag.target) drag.target.el.classList.remove(drag.target.hint);
       if (target) target.el.classList.add(target.hint);
     }
@@ -636,7 +638,7 @@
 
   function tickDrag(now) {
     const drag = S.drag;
-    if (!drag?.ghost) return;
+    if (!drag || !drag.ghost) return;
     const rect = drag.list.getBoundingClientRect();
     if (insideList(rect, drag.x, drag.y)) {
       const speed = edgeScrollSpeed(rect, drag.y);
@@ -655,7 +657,7 @@
     if (!grip && (e.pointerType !== "mouse" || e.target.closest("button, [data-act], a"))) return;
     const row = e.target.closest(".todo, .crow, .subtask");
     const task = row && findTodo(row.dataset.id);
-    if (task?.status !== "todo") return;
+    if (!task || task.status !== "todo") return;
     S.drag = { list: e.currentTarget, row, id: task.id, pointer: e.pointerId,
       startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY };
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -737,7 +739,7 @@
   }
 
   function renderTodos(force) {
-    if (S.drag?.ghost) return;
+    if (S.drag && S.drag.ghost) return;
     const list = $("list");
     const empty = $("empty");
     const items = visibleTodos();
