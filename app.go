@@ -342,7 +342,7 @@ func normalizePriority(p string) string {
 
 func normalizeStatus(s string) string {
 	switch s {
-	case statusTodo, statusDoing, statusDone, statusDropped:
+	case statusTodo, statusDoing, statusDone:
 		return s
 	default:
 		return statusTodo
@@ -373,6 +373,9 @@ func (a *App) messageByIDLocked(id string) (ChatMessage, bool) {
 }
 
 func (a *App) addTodo(in TodoInput, source, actor string) (Todo, error) {
+	if in.Status == "dropped" {
+		return Todo{}, fmt.Errorf("丢弃状态已移除，明确要求移出清单时请使用删除")
+	}
 	title := strings.TrimSpace(in.Title)
 	if title == "" {
 		return Todo{}, fmt.Errorf("任务标题不能为空")
@@ -430,9 +433,9 @@ func (a *App) addTodo(in TodoInput, source, actor string) (Todo, error) {
 			a.mu.Unlock()
 			return Todo{}, fmt.Errorf("子任务不能再创建子任务（只支持一层嵌套）")
 		}
-		if parent.Status == statusDropped || parent.Status == statusDone {
+		if parent.Status == statusDone {
 			a.mu.Unlock()
-			return Todo{}, fmt.Errorf("父任务已完成或已丢弃，请先重新打开")
+			return Todo{}, fmt.Errorf("父任务已完成，请先重新打开")
 		}
 	}
 	position := 0
@@ -465,9 +468,6 @@ func (a *App) addTodo(in TodoInput, source, actor string) (Todo, error) {
 	switch t.Status {
 	case statusDone:
 		t.CompletedAt = now
-	case statusDropped:
-		t.DroppedAt = now
-		t.DropReason = truncateRunes(strings.TrimSpace(in.DropReason), 500)
 	}
 	a.state.Todos = append(a.state.Todos, t)
 	detail := "新增任务"
@@ -502,8 +502,6 @@ func statusRank(status string) int {
 		return 1
 	case statusDone:
 		return 2
-	case statusDropped:
-		return 3
 	}
 	return 1
 }
@@ -675,6 +673,9 @@ func priorityLabel(priority string) string {
 }
 
 func (a *App) updateTodo(id string, patch TodoPatch, actor string) (Todo, error) {
+	if patch.Status != nil && *patch.Status == "dropped" {
+		return Todo{}, fmt.Errorf("丢弃状态已移除，明确要求移出清单时请使用删除")
+	}
 	a.mu.Lock()
 	idx := -1
 	for i := range a.state.Todos {
@@ -721,30 +722,15 @@ func (a *App) updateTodo(id string, patch TodoPatch, actor string) (Todo, error)
 			changes = append(changes, "优先级")
 		}
 	}
-	if patch.DropReason != nil {
-		v := truncateRunes(strings.TrimSpace(*patch.DropReason), 500)
-		if v != after.DropReason {
-			after.DropReason = v
-			changes = append(changes, "丢弃原因")
-		}
-	}
 	if patch.Status != nil {
 		v := normalizeStatus(*patch.Status)
 		if v != after.Status {
 			after.Status = v
 			changes = append(changes, "状态")
-			switch v {
-			case statusDone:
+			if v == statusDone {
 				after.CompletedAt = time.Now().UnixMilli()
-				after.DroppedAt = 0
-				after.DropReason = ""
-			case statusDropped:
+			} else {
 				after.CompletedAt = 0
-				after.DroppedAt = time.Now().UnixMilli()
-			default:
-				after.CompletedAt = 0
-				after.DroppedAt = 0
-				after.DropReason = ""
 			}
 		}
 	}
@@ -754,7 +740,7 @@ func (a *App) updateTodo(id string, patch TodoPatch, actor string) (Todo, error)
 	}
 	after.UpdatedAt = time.Now().UnixMilli()
 	a.state.Todos[idx] = after
-	if (after.Status == statusDone || after.Status == statusDropped) && a.state.validateFocus(a.state.FocusID) != nil {
+	if after.Status == statusDone && a.state.validateFocus(a.state.FocusID) != nil {
 		a.state.FocusID = ""
 	}
 	kind := "todo.update"
@@ -763,16 +749,10 @@ func (a *App) updateTodo(id string, patch TodoPatch, actor string) (Todo, error)
 	case after.Status == statusDone && before.Status != statusDone:
 		kind = "todo.complete"
 		detail = "完成任务"
-	case after.Status == statusDropped && before.Status != statusDropped:
-		kind = "todo.drop"
-		detail = "丢弃任务"
-		if after.DropReason != "" {
-			detail += "：" + after.DropReason
-		}
 	case after.Status == statusDoing && before.Status != statusDoing:
 		kind = "todo.start"
 		detail = "开始处理"
-	case after.Status == statusTodo && (before.Status == statusDone || before.Status == statusDropped):
+	case after.Status == statusTodo && before.Status == statusDone:
 		kind = "todo.reopen"
 		detail = "重新打开"
 	}
@@ -795,16 +775,6 @@ func (a *App) setTodoStatus(id, status, actor string) (Todo, error) {
 	return a.updateTodo(id, TodoPatch{Status: &status}, actor)
 }
 
-func (a *App) dropTodo(id, reason, actor string) (Todo, error) {
-	status := statusDropped
-	patch := TodoPatch{Status: &status}
-	if strings.TrimSpace(reason) != "" {
-		r := strings.TrimSpace(reason)
-		patch.DropReason = &r
-	}
-	return a.updateTodo(id, patch, actor)
-}
-
 func (st *persistedState) validateFocus(id string) error {
 	if id == "" {
 		return nil
@@ -813,13 +783,13 @@ func (st *persistedState) validateFocus(id string) error {
 		if task.ID != id {
 			continue
 		}
-		if task.Status == statusDone || task.Status == statusDropped {
-			return fmt.Errorf("只能专注未完成或未丢弃的任务")
+		if task.Status == statusDone {
+			return fmt.Errorf("只能专注未完成的任务")
 		}
 		if task.ParentID != "" {
 			for _, parent := range st.Todos {
-				if parent.ID == task.ParentID && (parent.Status == statusDone || parent.Status == statusDropped) {
-					return fmt.Errorf("父任务已完成或丢弃，请先重新打开父任务")
+				if parent.ID == task.ParentID && parent.Status == statusDone {
+					return fmt.Errorf("父任务已完成，请先重新打开父任务")
 				}
 			}
 		}
@@ -944,15 +914,13 @@ func (a *App) recordEvent(e HistoryEvent) {
 	a.markDirty()
 }
 
-func (a *App) todayStats() (open, done, dropped int) {
+func (a *App) todayStats() (open, done int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for _, t := range a.state.Todos {
 		switch t.Status {
 		case statusDone:
 			done++
-		case statusDropped:
-			dropped++
 		default:
 			open++
 		}
@@ -1044,12 +1012,12 @@ func (a *App) agentsBlock() string {
 		"本会话与一个桌面 TodoList 应用联动。用户会持续、零散地输入想法，可能夹带感慨、吐槽、转述和链接；**不是每句话都是任务**。任务清单和想法回顾库由这个本地接口维护：",
 		"",
 		"1. 读取 `%APPDATA%\\TodoListAgent\\bridge.json`，取 `url` 与 `token`。",
-		"2. `GET <url>/api/todos` 查看全部任务（含 `dropped`），用于查重和定位。",
+		"2. `GET <url>/api/todos` 查看全部任务，用于查重和定位。",
 		"3. `GET <url>/api/journal?limit=20&q=关键词` 回看旧想法原文及其关联任务。",
 		"4. `POST <url>/api/todos` 执行动作：",
 		"   - `{\"action\":\"add\",\"title\":\"...\",\"notes\":\"...\",\"priority\":\"pinned|high|normal|low\",\"parentId\":\"...\",\"sourceMessageId\":\"...\"}`",
-		"   - `{\"action\":\"update\",\"id\":\"...\",\"title\":\"...\",\"status\":\"todo|doing|done|dropped\",\"dropReason\":\"...\"}`",
-		"   - `{\"action\":\"complete\",\"id\":\"...\"}` / `reopen` / `drop`（带 reason） / `delete`",
+		"   - `{\"action\":\"update\",\"id\":\"...\",\"title\":\"...\",\"status\":\"todo|doing|done\"}`",
+		"   - `{\"action\":\"complete\",\"id\":\"...\"}` / `reopen` / `delete`",
 		"",
 		"处理规则：",
 		"- 只把**明确的行动意图**（想做、要做、记一下、提醒我、推进某事）提炼成任务；纯情绪/感慨/分享不要自动建任务，可以简短回应或问一句是否需要记下。",
@@ -1059,7 +1027,7 @@ func (a *App) agentsBlock() string {
 		"- 长期跟踪、需要一直排在最前面但不紧急的任务用 `priority:\"pinned\"`（置顶 · 长期）；它排在 high 之前，但视觉上不抢高优先级。",
 		"- `GET /api/todos` 返回的每个任务有 `number` 字段（如 `2.4`），它就是打钩圆圈右侧的序号；用户用序号指代时按 `number` 精确找到 id，不要按数组下标猜。序号会随排序、优先级和状态变化，操作前重新 GET。",
 		"- 先查列表再新增，避免重复；相似任务优先 update 而不是 add。",
-		"- 用户说“关掉/做完了/搞定” → `complete`；说“不做了/算了/放弃/搁置/丢弃” → `drop` 并写 `reason`；只有明确说“删除/删掉”才 `delete`。",
+		"- 用户确认完成任务时用 `complete`。用户明确要求移出清单时用 `delete`。仅表示暂缓或犹豫时保留任务。",
 		"- 开始处理某任务 → `doing`；完成后 → `done`。",
 		"- 想法里提到明确的时间/期限（今晚、明天、周五、周末、下周、某月某日等）时，把时间写进**任务标题**，不要只写在 notes；用尽量短的写法，如「周五前交开题报告」「周末去看展」。模糊的「以后/有空」不要硬塞时间。",
 		"- 修改标题时，新标题必须仍然能让人只看标题就知道要做什么。要保留旧标题里的核心动作、对象和关键限定，再融入修改意见；不要只写修改意见而丢掉原任务信息。例：旧标题「整理分享用的演示截图」，用户说「改成从录屏里挑」→「从录屏里挑分享用演示截图」，不能只写「从录屏里挑」。改完先自检：只看新标题能否知道要做什么？不能就补回旧核心信息。",
@@ -1067,7 +1035,7 @@ func (a *App) agentsBlock() string {
 		"- `notes` 必须分成两段：第一段是「这个事项的详细描述」，信息量要充足（目标、背景、做法、范围、判断标准等），不要只写一句；中间单独一行 `-------`；最后是「原话区」，只放用户原话，最新的在最上面、旧的依次往下。格式：`{{详细描述}}\\n\\n-------\\n\\n- {{最新原话}}\\n- {{较早原话}}`。",
 		"- 每次 update 都要重写详细描述，使其与当前任务一致；原话只追加、不改写、不删除，新原话放在原话区最上面，旧原话依次往后。所有原话必须集中在 `-------` 下方，不能混入详细描述；备注总长控制在 2000 字内，原话很多时保留最相关的。",
 		"- 来自 TodoList 的消息末尾有隐藏标记 `<!-- todo-msg:<id> -->`，请把它作为 `sourceMessageId`；没有标记就省略。",
-		"- 回复只简要说明实际新增/完成/丢弃了哪些任务，不要只列计划。",
+		"- 回复只简要说明实际新增/完成/删除了哪些任务，不要只列计划。",
 		"",
 		"当前接口地址（可能随应用重启变化，以 bridge.json 为准）：" + url,
 		agentsEnd,

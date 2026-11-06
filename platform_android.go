@@ -120,8 +120,8 @@ func TodoInvoke(method, data *C.char) *C.char {
 	handlers := map[string]any{
 		"todo_ready": a.bindingGetState, "todo_getState": a.bindingGetState,
 		"todo_addTodo": a.bindingAddTodo, "todo_updateTodo": a.bindingUpdateTodo,
-		"todo_setTodoStatus": a.bindingSetTodoStatus, "todo_dropTodo": a.bindingDropTodo,
-		"todo_deleteTodo": a.bindingDeleteTodo, "todo_moveTodo": a.bindingMoveTodo,
+		"todo_setTodoStatus": a.bindingSetTodoStatus,
+		"todo_deleteTodo":    a.bindingDeleteTodo, "todo_moveTodo": a.bindingMoveTodo,
 		"todo_setFocus": a.bindingSetFocus, "todo_journal": a.bindingJournal,
 		"todo_sendInput": a.bindingSendInput,
 		"todo_lanState":  a.bindingLANState, "todo_lanConfigure": a.bindingLANConfigure,

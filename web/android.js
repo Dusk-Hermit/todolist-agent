@@ -3,7 +3,7 @@
   document.documentElement.classList.add("android");
   window.todo_openUpdatePage = () => TodoNative.openUpdatePage();
   const methods = [
-    "ready", "getState", "addTodo", "updateTodo", "setTodoStatus", "dropTodo",
+    "ready", "getState", "addTodo", "updateTodo", "setTodoStatus",
     "deleteTodo", "moveTodo", "setFocus", "journal", "sendInput", "savePrefs",
     "lanState", "lanConfigure", "lanRefresh", "lanSelect",
     "updateState", "updateCheck", "updateInstall", "updateAuto",

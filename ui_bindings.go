@@ -21,10 +21,6 @@ func (a *App) bindingSetTodoStatus(id, status string) (Todo, error) {
 	return a.setTodoStatus(id, status, "user")
 }
 
-func (a *App) bindingDropTodo(id, reason string) (Todo, error) {
-	return a.dropTodo(id, reason, "user")
-}
-
 func (a *App) bindingMoveTodo(id, priority, beforeID string, after bool) (map[string]any, error) {
 	t, err := a.moveTodo(id, priority, beforeID, after, "user")
 	if err != nil {

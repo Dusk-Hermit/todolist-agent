@@ -54,7 +54,6 @@ func createMainWindow(a *App) webview2.WebView {
 		"todo_updateTodo":      a.bindingUpdateTodo,
 		"todo_deleteTodo":      a.bindingDeleteTodo,
 		"todo_setTodoStatus":   a.bindingSetTodoStatus,
-		"todo_dropTodo":        a.bindingDropTodo,
 		"todo_moveTodo":        a.bindingMoveTodo,
 		"todo_setFocus":        a.bindingSetFocus,
 		"todo_journal":         a.bindingJournal,

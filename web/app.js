@@ -9,6 +9,7 @@
     viewMode: "cards",
     dismissed: false,
     editingId: null,
+    deleteId: null,
     newParentId: null,
     tokenVisible: false,
     lastTodosSig: "",
@@ -43,9 +44,8 @@
     todo: { label: "待办", rank: 1 },
     doing: { label: "进行中", rank: 0 },
     done: { label: "已完成", rank: 2 },
-    dropped: { label: "已丢弃", rank: 3 },
   };
-  const FILTERS = ["all", "open", "doing", "done", "dropped"];
+  const FILTERS = ["all", "open", "doing", "done"];
 
   // ---------------------------------------------------------------- helpers
 
@@ -358,7 +358,7 @@
 
   function childrenOf(id) {
     const all = allTodos();
-    const rank = { doing: 0, todo: 1, done: 2, dropped: 3 };
+    const rank = { doing: 0, todo: 1, done: 2 };
     return all.filter((t) => t.parentId === id).sort((a, b) => {
       const ra = rank[a.status] == null ? 1 : rank[a.status];
       const rb = rank[b.status] == null ? 1 : rank[b.status];
@@ -402,17 +402,13 @@
     if (S.filter === "open") list = list.filter((t) => t.status === "todo" || t.status === "doing");
     else if (S.filter === "doing") list = list.filter((t) => t.status === "doing");
     else if (S.filter === "done") list = list.filter((t) => t.status === "done");
-    else if (S.filter === "dropped") list = list.filter((t) => t.status === "dropped");
-    const rank = { doing: 0, todo: 1, done: 2, dropped: 3 };
+    const rank = { doing: 0, todo: 1, done: 2 };
     return list.slice().sort((a, b) => {
       const ra = rank[a.status] == null ? 1 : rank[a.status];
       const rb = rank[b.status] == null ? 1 : rank[b.status];
       if (ra !== rb) return ra - rb;
       if (a.status === "done" && b.status === "done") {
         return (b.completedAt || b.updatedAt || 0) - (a.completedAt || a.updatedAt || 0);
-      }
-      if (a.status === "dropped" && b.status === "dropped") {
-        return (b.droppedAt || b.updatedAt || 0) - (a.droppedAt || a.updatedAt || 0);
       }
       const pa = (PRIORITY[a.priority] || PRIORITY.normal).rank;
       const pb = (PRIORITY[b.priority] || PRIORITY.normal).rank;
@@ -437,11 +433,10 @@
 
   function subtaskRowHTML(t) {
     const done = t.status === "done";
-    const dropped = t.status === "dropped";
     const doing = t.status === "doing";
     const focused = !!(S.data && S.data.focusId === t.id);
-    return `<div class="subtask prio-${priorityKey(t)} ${focused ? "focused" : ""} ${done ? "done" : ""} ${doing ? "doing" : ""} ${dropped ? "dropped" : ""}" data-id="${esc(t.id)}">
-      <button class="scheck" data-act="toggle" aria-label="${done || dropped ? "重新打开" : "完成子任务"}" title="${done || dropped ? "重新打开" : "完成子任务"}">
+    return `<div class="subtask prio-${priorityKey(t)} ${focused ? "focused" : ""} ${done ? "done" : ""} ${doing ? "doing" : ""}" data-id="${esc(t.id)}">
+      <button class="scheck" data-act="toggle" aria-label="${done ? "重新打开" : "完成子任务"}" title="${done ? "重新打开" : "完成子任务"}">
         <svg class="icon"><use href="#i-check"/></svg>
       </button>
       ${taskNumberHTML(t, "subtask-num")}
@@ -449,13 +444,9 @@
         <div class="stitle" data-act="edit">${esc(t.title)}</div>
         ${t.notes ? `<div class="snotes">${esc(t.notes)}</div>` : ""}
       </div>
-      <div class="smeta">
-        <span>${esc(relTime(t.updatedAt || t.createdAt))}</span>
-      </div>
       <div class="sactions">
-        ${done || dropped ? "" : focusButtonHTML(focused)}
+        ${done ? "" : focusButtonHTML(focused)}
         <button class="icon-btn" data-act="edit" title="编辑" aria-label="编辑"><svg class="icon"><use href="#i-edit"/></svg></button>
-        ${dropped ? "" : '<button class="icon-btn" data-act="drop" title="丢弃" aria-label="丢弃"><svg class="icon"><use href="#i-drop"/></svg></button>'}
         <button class="icon-btn del" data-act="del" title="删除" aria-label="删除"><svg class="icon"><use href="#i-trash"/></svg></button>
       </div>
     </div>`;
@@ -464,20 +455,14 @@
   function todoHTML(t) {
     const done = t.status === "done";
     const doing = t.status === "doing";
-    const dropped = t.status === "dropped";
     const focused = !!(S.data && S.data.focusId === t.id);
-    const children = (done || dropped) ? [] : childrenOf(t.id);
-    const openChildren = children.filter((c) => c.status !== "done" && c.status !== "dropped").length;
-    const statusPill = doing
-      ? '<span class="pill doing">进行中</span>'
-      : dropped
-        ? '<span class="pill dropped">已丢弃</span>'
-        : "";
+    const children = done ? [] : childrenOf(t.id);
+    const openChildren = children.filter((c) => c.status !== "done").length;
+    const statusPill = doing ? '<span class="pill doing">进行中</span>' : "";
     const focusPill = focused ? '<span class="pill focus">专注</span>' : "";
     const subPill = children.length ? `<span class="pill subcount">${children.length} 子任务</span>` : "";
     const notes = t.notes ? `<div class="todo-notes">${esc(t.notes)}</div>` : "";
-    const reason = dropped && t.dropReason ? `<div class="todo-notes">丢弃原因：${esc(t.dropReason)}</div>` : "";
-    const time = relTime(t.updatedAt || t.createdAt);
+    const meta = statusPill + focusPill + subPill;
     const subtasks = children.length ? `<div class="subtasks">
       <div class="subtask-top">
         <span>子任务</span>
@@ -486,25 +471,21 @@
       ${children.map(subtaskRowHTML).join("")}
       <button class="sub-add" data-act="sub-add" data-parent-id="${esc(t.id)}">+ 添加子任务</button>
     </div>` : "";
-    return `<article class="todo prio-${priorityKey(t)} ${focused ? "focused" : ""} ${done ? "done" : ""} ${doing ? "doing" : ""} ${dropped ? "dropped" : ""}" data-id="${esc(t.id)}">
+    return `<article class="todo prio-${priorityKey(t)} ${focused ? "focused" : ""} ${done ? "done" : ""} ${doing ? "doing" : ""}" data-id="${esc(t.id)}">
       <button class="check" data-act="toggle" aria-label="${done ? "标记为待办" : "标记为完成"}" title="${done ? "标记为待办" : "标记为完成"}">
         <svg class="icon"><use href="#i-check"/></svg>
       </button>
       ${taskNumberHTML(t, "todo-num")}
       <div class="todo-main">
         <div class="todo-title" data-act="edit" title="点击编辑">${esc(t.title)}</div>
-        ${notes}${reason}
-        <div class="todo-meta">
-          ${statusPill}${focusPill}${subPill}
-          <span>${esc(time)}</span>
-        </div>
+        ${notes}
+        ${meta ? `<div class="todo-meta">${meta}</div>` : ""}
         ${subtasks}
       </div>
       <div class="todo-actions">
-        ${done || dropped ? "" : focusButtonHTML(focused)}
+        ${done ? "" : focusButtonHTML(focused)}
         <button class="icon-btn" data-act="edit" title="编辑" aria-label="编辑"><svg class="icon"><use href="#i-edit"/></svg></button>
-        ${done || dropped ? "" : `<button class="icon-btn" data-act="sub-add" data-parent-id="${esc(t.id)}" title="添加子任务" aria-label="添加子任务"><svg class="icon"><use href="#i-plus"/></svg></button>`}
-        ${dropped ? "" : '<button class="icon-btn" data-act="drop" title="丢弃" aria-label="丢弃"><svg class="icon"><use href="#i-drop"/></svg></button>'}
+        ${done ? "" : `<button class="icon-btn" data-act="sub-add" data-parent-id="${esc(t.id)}" title="添加子任务" aria-label="添加子任务"><svg class="icon"><use href="#i-plus"/></svg></button>`}
         <button class="icon-btn del" data-act="del" title="删除" aria-label="删除"><svg class="icon"><use href="#i-trash"/></svg></button>
       </div>
     </article>`;
@@ -512,30 +493,24 @@
 
   function compactRowHTML(t, isChild) {
     const done = t.status === "done";
-    const dropped = t.status === "dropped";
     const doing = t.status === "doing";
-    const checked = done || dropped;
     const focused = !!(S.data && S.data.focusId === t.id);
     const children = isChild ? [] : childrenOf(t.id);
-    const sub = children.length ? `<span>· ${children.filter((c) => c.status === "done" || c.status === "dropped").length}/${children.length}</span>` : "";
-    return `<div class="crow prio-${priorityKey(t)} ${focused ? "focused" : ""} ${isChild ? "child" : ""} ${done ? "done" : ""} ${doing ? "doing" : ""} ${dropped ? "dropped" : ""}" data-id="${esc(t.id)}">
-      <button class="ccheck" data-act="toggle" aria-label="${checked ? "重新打开" : "标记完成"}" title="${checked ? "重新打开" : "标记完成"}">
+    const sub = children.length ? `<span>${children.filter((c) => c.status === "done").length}/${children.length}</span>` : "";
+    const meta = (focused ? '<span class="focus-tag">专注</span>' : "") + sub;
+    return `<div class="crow prio-${priorityKey(t)} ${focused ? "focused" : ""} ${isChild ? "child" : ""} ${done ? "done" : ""} ${doing ? "doing" : ""}" data-id="${esc(t.id)}">
+      <button class="ccheck" data-act="toggle" aria-label="${done ? "重新打开" : "标记完成"}" title="${done ? "重新打开" : "标记完成"}">
         <svg class="icon"><use href="#i-check"/></svg>
       </button>
       ${taskNumberHTML(t, "crow-num")}
       <div class="crow-main">
         <div class="crow-title" data-act="edit" title="${esc(t.notes || t.title)}">${esc(t.title)}</div>
-        <div class="crow-meta">
-          ${focused ? '<span class="focus-tag">专注</span>' : ""}
-          ${sub}
-          <span>${esc(relTime(t.updatedAt || t.createdAt))}</span>
-        </div>
+        ${meta ? `<div class="crow-meta">${meta}</div>` : ""}
       </div>
       <div class="crow-actions">
-        ${done || dropped ? "" : focusButtonHTML(focused)}
+        ${done ? "" : focusButtonHTML(focused)}
         <button class="icon-btn" data-act="edit" title="编辑" aria-label="编辑"><svg class="icon"><use href="#i-edit"/></svg></button>
-        ${isChild || done || dropped ? "" : `<button class="icon-btn" data-act="sub-add" data-parent-id="${esc(t.id)}" title="添加子任务" aria-label="添加子任务"><svg class="icon"><use href="#i-plus"/></svg></button>`}
-        ${dropped ? "" : '<button class="icon-btn" data-act="drop" title="丢弃" aria-label="丢弃"><svg class="icon"><use href="#i-drop"/></svg></button>'}
+        ${isChild || done ? "" : `<button class="icon-btn" data-act="sub-add" data-parent-id="${esc(t.id)}" title="添加子任务" aria-label="添加子任务"><svg class="icon"><use href="#i-plus"/></svg></button>`}
         <button class="icon-btn del" data-act="del" title="删除" aria-label="删除"><svg class="icon"><use href="#i-trash"/></svg></button>
       </div>
     </div>`;
@@ -561,12 +536,11 @@
   }
 
   function compactGroups(items) {
-    const order = ["doing", "todo", "done", "dropped"];
+    const order = ["doing", "todo", "done"];
     const allowed = S.filter === "all" || S.filter === "open"
       ? order
       : S.filter === "doing" ? ["doing"]
         : S.filter === "done" ? ["done"]
-          : S.filter === "dropped" ? ["dropped"]
             : ["todo", "doing"];
     return allowed
       .map((status) => ({ status, items: items.filter((t) => t.status === status) }))
@@ -575,7 +549,7 @@
 
   function groupCollapsed(status) {
     if (S.filter !== "all" && S.filter !== "open") return false;
-    if (status === "done" || status === "dropped") {
+    if (status === "done") {
       return S.collapsedGroups[status] !== false;
     }
     return S.collapsedGroups[status] === true;
@@ -586,7 +560,7 @@
     return groups.map((g) => {
       const collapsed = groupCollapsed(g.status);
       const rowFor = (t) => {
-        const children = (t.status === "done" || t.status === "dropped") ? [] : childrenOf(t.id);
+        const children = t.status === "done" ? [] : childrenOf(t.id);
         return compactRowHTML(t, false) + children.map((c) => compactRowHTML(c, true)).join("");
       };
       let rows;
@@ -758,9 +732,6 @@
     } else if (all.length > 0 && S.filter === "done") {
       title = "还没有完成的任务";
       sub = "完成任务后，它会带着完成时间出现在这里。";
-    } else if (all.length > 0 && S.filter === "dropped") {
-      title = "没有丢弃的任务";
-      sub = "说「不做了 / 算了 / 丢弃」时，任务会归档到这里，而不是消失。";
     }
     return { title, sub };
   }
@@ -776,7 +747,7 @@
       S.filter,
       S.data && S.data.focusId,
       JSON.stringify(S.collapsedGroups),
-      allTodos().map((t) => [t.id, t.parentId, t.status, t.title, t.notes, t.priority, t.updatedAt, t.completedAt, t.droppedAt, t.dropReason, t.position].join("\u0001")).join("\u0002"),
+      allTodos().map((t) => [t.id, t.parentId, t.status, t.title, t.notes, t.priority, t.updatedAt, t.completedAt, t.position].join("\u0001")).join("\u0002"),
     ].join("\u0003");
     if (!force && sig === S.lastTodosSig) {
       renderCounts();
@@ -805,12 +776,10 @@
     const open = all.filter((t) => t.status === "todo" || t.status === "doing").length;
     const doing = all.filter((t) => t.status === "doing").length;
     const done = all.filter((t) => t.status === "done").length;
-    const dropped = all.filter((t) => t.status === "dropped").length;
     $("countAll").textContent = all.length;
     $("countOpen").textContent = open;
     $("countDoing").textContent = doing;
     $("countDone").textContent = done;
-    $("countDropped").textContent = dropped;
   }
 
   function updateFilterButtons() {
@@ -845,7 +814,7 @@
   async function toggleTodo(id) {
     const t = findTodo(id);
     if (!t) return;
-    const next = (t.status === "done" || t.status === "dropped") ? "todo" : "done";
+    const next = t.status === "done" ? "todo" : "done";
     try {
       await call("todo_setTodoStatus", id, next);
       showToast("success", next === "done" ? "已完成：" + clamp(t.title, 30) : "已重新打开");
@@ -865,27 +834,26 @@
     }
   }
 
-  async function dropTodoAction(id) {
+  function confirmDeleteTodo(id) {
     const t = findTodo(id);
     if (!t) return;
-    const reason = window.prompt(`丢弃「${t.title}」\n\n可以写一句原因（可留空）：`, "");
-    if (reason === null) return;
-    try {
-      await call("todo_dropTodo", id, reason.trim());
-      showToast("info", "已丢弃，可在「丢弃」里找回");
-    } catch (e) {
-      showToast("error", errText(e));
-    }
+    const dialog = $("deleteDialog");
+    if (dialog.open) return;
+    S.deleteId = id;
+    $("deleteTaskTitle").textContent = t.title;
+    const children = childrenOf(id).length;
+    $("deleteTaskDetail").textContent = children ? `此任务和它的 ${children} 个子任务会一起删除。` : "此任务会从清单移除。";
+    dialog.returnValue = "cancel";
+    dialog.showModal();
   }
 
-  async function deleteTodo(id) {
-    const t = findTodo(id);
-    if (!t) return;
-    const n = childrenOf(t.id).length;
-    const suffix = n ? `\n\n它还有 ${n} 个子任务，会一起删除。` : "";
-    if (!window.confirm(`删除「${t.title}」？\n\n如果只是不想做了，建议用「丢弃」保留记录。${suffix}`)) return;
+  async function finishDeleteTodo() {
+    const id = S.deleteId;
+    S.deleteId = null;
+    if (!id || $("deleteDialog").returnValue !== "delete") return;
     try {
       await call("todo_deleteTodo", id);
+      if (S.editingId === id) closeTaskModal();
       showToast("info", "已删除任务");
     } catch (e) {
       showToast("error", errText(e));
@@ -991,8 +959,8 @@
       case "onboarding": return ["user", "i-bolt"];
       case "todo.add": return [e.actor === "agent" ? "agent" : "user", "i-plus"];
       case "todo.complete": return ["done", "i-check"];
-      case "todo.drop": return ["", "i-drop"];
       case "todo.move": return ["", "i-list"];
+      case "todo.drop":
       case "todo.delete": return ["", "i-trash"];
       case "todo.update":
       case "todo.start": return [e.actor === "agent" ? "agent" : "", "i-edit"];
@@ -1072,17 +1040,14 @@
     $("taskNotes").value = t ? (t.notes || "") : "";
     $("taskPriority").value = t ? (t.priority || "normal") : "normal";
     $("taskStatus").value = t ? (t.status || "todo") : "todo";
-    $("taskDropReason").value = t ? (t.dropReason || "") : "";
-    let hint = t
-      ? `创建于 ${relTime(t.createdAt)} · 最近更新 ${relTime(t.updatedAt)}`
-      : "任务会保存在本地；如果已接入 DSH，也可以让 DSH 来维护它。";
-    if (parent) hint = `父任务：${parent.title} · ` + hint;
-    if (childCount) hint = `含 ${childCount} 个子任务 · ` + hint;
-    $("taskHint").textContent = hint;
+    const hints = [];
+    if (parent) hints.push(`父任务：${parent.title}`);
+    if (childCount) hints.push(`含 ${childCount} 个子任务`);
+    if (!t) hints.push("任务会保存在本地，也可以由已接入的 DSH 维护。");
+    $("taskHint").textContent = hints.join(" · ");
+    $("taskHint").classList.toggle("hidden", hints.length === 0);
     $("taskDelete").classList.toggle("hidden", !t);
-    $("taskDrop").classList.toggle("hidden", !t || (t && t.status === "dropped"));
     $("taskOrder").classList.toggle("hidden", !t || !["todo", "doing"].includes(t.status));
-    syncDropFields();
     const sourceBox = $("taskSourceBox");
     if (t && (t.sourceText || t.sourceMessageID)) {
       sourceBox.classList.remove("hidden");
@@ -1096,12 +1061,6 @@
     $("taskLayer").classList.remove("hidden");
     S.taskOpen = true;
     setTimeout(() => $("taskTitle").focus(), 30);
-  }
-
-  function syncDropFields() {
-    const dropped = $("taskStatus").value === "dropped";
-    $("taskDropReasonField").classList.toggle("hidden", !dropped);
-    if (S.editingId) $("taskDrop").classList.toggle("hidden", dropped || !S.editingId);
   }
 
   function closeTaskModal() {
@@ -1126,9 +1085,6 @@
       status: $("taskStatus").value,
     };
     if (!S.editingId && S.newParentId) payload.parentId = S.newParentId;
-    if (payload.status === "dropped") {
-      payload.dropReason = $("taskDropReason").value.trim();
-    }
     try {
       if (S.editingId) {
         await call("todo_updateTodo", S.editingId, payload);
@@ -1137,34 +1093,6 @@
         await call("todo_addTodo", payload);
         showToast("success", "任务已添加");
       }
-      closeTaskModal();
-    } catch (e) {
-      showToast("error", errText(e));
-    }
-  }
-
-  async function deleteTaskFromModal() {
-    if (!S.editingId) return;
-    const t = findTodo(S.editingId);
-    if (!t) return;
-    const n = childrenOf(t.id).length;
-    const suffix = n ? `\n\n它还有 ${n} 个子任务，会一起删除。` : "";
-    if (!window.confirm(`删除「${t.title}」？\n\n建议用「丢弃」保留记录。${suffix}`)) return;
-    try {
-      await call("todo_deleteTodo", S.editingId);
-      showToast("info", "已删除任务");
-      closeTaskModal();
-    } catch (e) {
-      showToast("error", errText(e));
-    }
-  }
-
-  async function dropTaskFromModal() {
-    if (!S.editingId) return;
-    const reason = $("taskDropReason").value.trim() || "手动丢弃";
-    try {
-      await call("todo_dropTodo", S.editingId, reason);
-      showToast("info", "已丢弃，可在「丢弃」里找回");
       closeTaskModal();
     } catch (e) {
       showToast("error", errText(e));
@@ -1715,8 +1643,7 @@
       if (act.dataset.act === "toggle") toggleTodo(id);
       else if (act.dataset.act === "focus") toggleFocus(id);
       else if (act.dataset.act === "edit") openTaskModal(id);
-      else if (act.dataset.act === "drop") dropTodoAction(id);
-      else if (act.dataset.act === "del") deleteTodo(id);
+      else if (act.dataset.act === "del") confirmDeleteTodo(id);
     });
 
     const listEl = $("list");
@@ -1731,9 +1658,8 @@
     $("taskClose").addEventListener("click", closeTaskModal);
     $("taskCancel").addEventListener("click", closeTaskModal);
     $("taskSave").addEventListener("click", saveTask);
-    $("taskDelete").addEventListener("click", deleteTaskFromModal);
-    $("taskDrop").addEventListener("click", dropTaskFromModal);
-    $("taskStatus").addEventListener("change", syncDropFields);
+    $("taskDelete").addEventListener("click", () => confirmDeleteTodo(S.editingId));
+    $("deleteDialog").addEventListener("close", finishDeleteTodo);
     $("taskLayer").addEventListener("mousedown", (e) => { if (e.target === $("taskLayer")) closeTaskModal(); });
     $("taskTitle").addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.isComposing) {
@@ -1814,6 +1740,7 @@
 
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
+        if ($("deleteDialog").open) return;
         if (S.taskOpen) closeTaskModal();
         else if (S.settingsOpen) closeSettings();
         else if (S.panelOpen) closePanel();

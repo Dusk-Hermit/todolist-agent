@@ -26,7 +26,6 @@
   <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2Z"/></symbol>
   <symbol id="i-dot" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/></symbol>
   <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21.5v-16Z"/><path d="M4 18.5A2.5 2.5 0 0 1 6.5 16H20"/></symbol>
-  <symbol id="i-drop" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4.8h6V7m-8.5 0 .8 13h9.4l.8-13"/><path d="m9.5 11 5 5M14.5 11l-5 5"/></symbol>
   <symbol id="i-list" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
   <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol>
@@ -105,7 +104,6 @@
       <button class="filter" data-filter="open">待办 <b id="countOpen">0</b></button>
       <button class="filter" data-filter="doing">进行中 <b id="countDoing">0</b></button>
       <button class="filter" data-filter="done">完成 <b id="countDone">0</b></button>
-      <button class="filter" data-filter="dropped">丢弃 <b id="countDropped">0</b></button>
     </div>
     <button class="view-btn" id="viewBtn" title="切换紧凑模式" aria-label="切换紧凑模式" aria-pressed="false">
       <svg class="icon" id="viewIcon"><use href="#i-list"/></svg>
@@ -235,14 +233,9 @@
             <option value="todo">待办</option>
             <option value="doing">进行中</option>
             <option value="done">已完成</option>
-            <option value="dropped">已丢弃</option>
           </select>
         </label>
       </div>
-      <label class="field hidden" id="taskDropReasonField">
-        <span>丢弃原因</span>
-        <input id="taskDropReason" maxlength="500" placeholder="为什么不做 / 搁置？">
-      </label>
       <div class="source-box hidden" id="taskSourceBox">
         <div class="source-head">来源想法 <time id="taskSourceTime"></time></div>
         <div class="source-text" id="taskSourceText"></div>
@@ -254,9 +247,6 @@
       </div>
     </div>
     <footer class="modal-foot">
-      <button class="danger-btn hidden" id="taskDrop">
-        <svg class="icon"><use href="#i-drop"/></svg> 丢弃
-      </button>
       <button class="danger-btn hidden" id="taskDelete">
         <svg class="icon"><use href="#i-trash"/></svg> 删除
       </button>
@@ -266,6 +256,21 @@
     </footer>
   </div>
 </div>
+
+<dialog class="modal delete-dialog" id="deleteDialog" aria-labelledby="deleteDialogTitle" aria-describedby="deleteTaskTitle deleteTaskDetail">
+  <header class="modal-head">
+    <h2 id="deleteDialogTitle">删除任务？</h2>
+  </header>
+  <div class="modal-body">
+    <p class="delete-task-title" id="deleteTaskTitle"></p>
+    <p class="field-hint" id="deleteTaskDetail"></p>
+  </div>
+  <form class="modal-foot" method="dialog">
+    <div class="spacer"></div>
+    <button class="ghost-btn" value="cancel" autofocus>取消</button>
+    <button class="danger-btn" value="delete">删除</button>
+  </form>
+</dialog>
 
 <div class="modal-layer hidden" id="settingsLayer">
   <div class="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
@@ -401,7 +406,7 @@
 
       <section class="settings-section about">
         <div class="section-title"><span class="section-index">05</span> 关于</div>
-        <p><b>TodoList Agent <span id="aboutVersion">0.4.9</span></b></p>
+        <p><b>TodoList Agent <span id="aboutVersion">0.4.10</span></b></p>
         <p class="desktop-only">桌面清单通过 DSH 的本地 Web API 向当前会话发送输入，并接收 DSH 对任务的修改。</p>
         <p class="mobile-only">任务和待发消息会保存在手机上。配对后，手机通过局域网同步任务，并将待发消息交给电脑处理。</p>
         <p class="field-hint" id="updateStatus" aria-live="polite"></p>

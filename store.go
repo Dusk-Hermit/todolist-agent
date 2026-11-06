@@ -52,8 +52,10 @@ func (a *App) load() error {
 		a.state = defaultState()
 		return err
 	}
-	normalizeState(&st)
-	repaired := restorePromptCompletions(&st)
+	repaired := normalizeState(&st)
+	if restorePromptCompletions(&st) {
+		repaired = true
+	}
 	if platformName == "windows" && recoverPromptTracking(&st) {
 		repaired = true
 	}
@@ -65,7 +67,7 @@ func (a *App) load() error {
 	return nil
 }
 
-func normalizeState(st *persistedState) {
+func normalizeState(st *persistedState) bool {
 	if st.Version < 2 {
 		st.Version = 2
 	}
@@ -78,7 +80,8 @@ func normalizeState(st *persistedState) {
 	if st.Messages == nil {
 		st.Messages = []ChatMessage{}
 	}
-	if st.Prefs.Filter == "" {
+	repaired := st.Prefs.Filter == "dropped"
+	if st.Prefs.Filter == "" || repaired {
 		st.Prefs.Filter = "all"
 	}
 	if st.Prefs.Tab == "" {
@@ -117,9 +120,9 @@ func normalizeState(st *persistedState) {
 		if t.UpdatedAt == 0 {
 			t.UpdatedAt = t.CreatedAt
 		}
-		if t.Status == statusDropped && t.DroppedAt == 0 {
-			t.DroppedAt = t.UpdatedAt
-		}
+	}
+	if migrateDroppedTasks(st) {
+		repaired = true
 	}
 	if st.validateFocus(st.FocusID) != nil {
 		st.FocusID = ""
@@ -181,4 +184,47 @@ func normalizeState(st *persistedState) {
 			}
 		}
 	}
+	return repaired
+}
+
+// Older devices may still send a dropped task. Removing it during load and
+// merge publishes a tombstone, while the history keeps the archived snapshot.
+func migrateDroppedTasks(st *persistedState) bool {
+	removed := make(map[string]bool)
+	for _, task := range st.Todos {
+		if task.Status != "dropped" {
+			continue
+		}
+		removed[task.ID] = true
+		id := "legacy-drop-" + task.ID
+		exists := false
+		for _, event := range st.Events {
+			if event.ID == id {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			st.Events = append(st.Events, HistoryEvent{
+				ID: id, Kind: "todo.delete", Actor: "system", TodoID: task.ID, Title: task.Title,
+				Detail: "从旧版丢弃栏目移除", At: max(task.DroppedAt, task.UpdatedAt),
+				Before: cloneTodoPtr(task), SourceMessageID: task.SourceMessageID,
+			})
+		}
+	}
+	if len(removed) == 0 {
+		return false
+	}
+	kept := st.Todos[:0]
+	for _, task := range st.Todos {
+		if removed[task.ID] {
+			continue
+		}
+		if removed[task.ParentID] {
+			task.ParentID = ""
+		}
+		kept = append(kept, task)
+	}
+	st.Todos = kept
+	return true
 }

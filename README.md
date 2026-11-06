@@ -31,7 +31,7 @@ TodoList Agent moves that first step into the desktop:
 - you write the thought where it appears;
 - DSH reads it in a real conversation and extracts the action;
 - the result comes back as a clean task, with the original quote still attached;
-- you can refine, focus, split, drop, or finish it without leaving the window.
+- you can refine, focus, split, delete, or finish it without leaving the window.
 
 Everything runs locally. The app does not take screenshots, simulate a keyboard, or start a second DSH process. It talks to DSH's own local Web API.
 
@@ -42,7 +42,7 @@ Everything runs locally. The app does not take screenshots, simulate a keyboard,
 - The app discovers the running DSH instance on your machine.
 - On first launch it creates a dedicated session named `TodoList · DSH 联动` and reuses it later.
 - Messages you send appear in DSH as normal user messages, so the agent sees the full context and can reply.
-- DSH can update the list through a local bridge API: add, update, start, complete, drop, reopen, and delete.
+- DSH can add, update, start, complete, reopen, and delete tasks through the local bridge API.
 
 ### Messy input, explicit tasks
 
@@ -56,7 +56,7 @@ Everything runs locally. The app does not take screenshots, simulate a keyboard,
 A task can have subtasks when the work genuinely has steps, for example “prepare a talk” → outline / examples / screenshots.
 
 - Parent tasks show progress such as `2/3`.
-- Subtasks have their own status and can be completed or dropped independently.
+- Subtasks have their own status and can be completed or deleted independently.
 - Subtasks cannot be nested further; the tree stays at one level.
 - Deleting a parent task deletes its subtasks after a confirmation.
 
@@ -76,13 +76,13 @@ Every message sent from the desktop composer is stored as a **journal entry**, e
 - Search old thoughts or task titles.
 - See which tasks were created from a thought.
 - Jump from a task back to its source message.
-- Switch to **Activity** to see additions, completions, drops, moves, and their original quotes.
+- Switch to **Activity** to see additions, completions, deletions, moves, and their original quotes.
 
 ### Built for a long list
 
 - Card view for context and subtasks.
 - Compact view for scanning dozens or hundreds of tasks by status and priority.
-- Completed and dropped groups collapse by default.
+- The completed group collapses by default.
 - Tray support and a light warm-paper theme designed to stay on screen for a long time.
 
 <p>
@@ -124,7 +124,7 @@ From then on:
 
 - Type a thought in the composer and press `Enter`.
 - DSH reads the message and updates the list through the local API.
-- Use the task actions to edit, split, drop, finish, or focus.
+- Use the task actions to edit, split, delete, finish, or focus.
 
 ## Android and LAN sync
 
@@ -225,7 +225,7 @@ Example actions:
 {"action":"add","title":"周五前准备下周的分享","priority":"high","sourceMessageId":"..."}
 {"action":"update","id":"...","title":"...","status":"doing"}
 {"action":"complete","id":"..."}
-{"action":"drop","id":"...","reason":"暂时不做了"}
+{"action":"delete","id":"..."}
 ```
 
 `GET /api/todos` includes a display-only `number` field (`2.4`) that DSH can use when the user refers to a task by number.
@@ -236,12 +236,7 @@ Example actions:
 
 `todo` → `doing` → `done`
 
-A task can also be `dropped`. Dropping is intentionally different from deleting:
-
-- dropped tasks stay in history;
-- they are grouped separately and can be filtered;
-- they keep the reason and original words;
-- they can be reopened or permanently deleted.
+Deleting a task removes it from the list and records the change in Activity. Upgrading from an older version moves previously dropped tasks out of the list and keeps their snapshots in Activity. Their remaining subtasks become top-level tasks.
 
 ### Notes format
 
@@ -325,7 +320,6 @@ docs/         screenshots
 
 - **Local first.** No account, no cloud sync, no background service beyond the loopback bridge.
 - **One level of nesting.** Enough structure for real work, without turning the list into an infinite tree.
-- **Drop is not delete.** Most abandoned tasks are not mistakes; they are decisions worth keeping.
 - **The original words stay.** Summaries are useful, but the source is often the most valuable context months later.
 - **A dedicated session.** The agent gets a stable place to work without taking over the conversation you are using.
 

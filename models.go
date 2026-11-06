@@ -2,13 +2,12 @@ package main
 
 const (
 	appName    = "TodoList Agent"
-	appVersion = "0.4.9"
+	appVersion = "0.4.10"
 	appID      = "Dusk.TodoListAgent"
 
-	statusTodo    = "todo"
-	statusDoing   = "doing"
-	statusDone    = "done"
-	statusDropped = "dropped"
+	statusTodo  = "todo"
+	statusDoing = "doing"
+	statusDone  = "done"
 
 	priorityLow    = "low"
 	priorityNormal = "normal"
@@ -28,7 +27,7 @@ type Todo struct {
 	CreatedAt       int64  `json:"createdAt"`
 	UpdatedAt       int64  `json:"updatedAt"`
 	CompletedAt     int64  `json:"completedAt,omitempty"`
-	DroppedAt       int64  `json:"droppedAt,omitempty"`
+	DroppedAt       int64  `json:"droppedAt,omitempty"` // legacy history
 	DropReason      string `json:"dropReason,omitempty"`
 	ParentID        string `json:"parentId,omitempty"`
 	Number          string `json:"number,omitempty"` // display-only, recomputed in snapshots
@@ -202,13 +201,11 @@ type TodoInput struct {
 	ParentID        string `json:"parentId"`
 	SourceMessageID string `json:"sourceMessageId"`
 	SourceText      string `json:"sourceText"`
-	DropReason      string `json:"dropReason"`
 }
 
 type TodoPatch struct {
-	Title      *string `json:"title"`
-	Notes      *string `json:"notes"`
-	Priority   *string `json:"priority"`
-	Status     *string `json:"status"`
-	DropReason *string `json:"dropReason"`
+	Title    *string `json:"title"`
+	Notes    *string `json:"notes"`
+	Priority *string `json:"priority"`
+	Status   *string `json:"status"`
 }

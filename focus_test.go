@@ -9,7 +9,6 @@ func TestSubtaskFocusPersistsAndClearsWhenUnavailable(t *testing.T) {
 		status string
 	}{
 		{name: "complete child", status: statusDone},
-		{name: "drop child", status: statusDropped},
 		{name: "delete child"},
 		{name: "complete parent", parent: true, status: statusDone},
 		{name: "delete parent", parent: true},

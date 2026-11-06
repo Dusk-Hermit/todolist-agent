@@ -222,8 +222,6 @@ type bridgeAction struct {
 	Notes           *string `json:"notes"`
 	Priority        *string `json:"priority"`
 	Status          *string `json:"status"`
-	Reason          string  `json:"reason"`
-	DropReason      string  `json:"dropReason"`
 	ParentID        string  `json:"parentId"`
 	SourceMessageID string  `json:"sourceMessageId"`
 	SourceText      string  `json:"sourceText"`
@@ -288,11 +286,6 @@ func (b *BridgeServer) handlePost(w http.ResponseWriter, r *http.Request) {
 		if act.Status != nil {
 			in.Status = *act.Status
 		}
-		if act.DropReason != "" {
-			in.DropReason = act.DropReason
-		} else if act.Reason != "" {
-			in.DropReason = act.Reason
-		}
 		todo, err = b.app.addTodo(in, "agent", actor)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
@@ -304,13 +297,6 @@ func (b *BridgeServer) handlePost(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		patch := TodoPatch{Title: act.Title, Notes: act.Notes, Priority: act.Priority, Status: act.Status}
-		reason := strings.TrimSpace(act.DropReason)
-		if reason == "" {
-			reason = strings.TrimSpace(act.Reason)
-		}
-		if reason != "" {
-			patch.DropReason = &reason
-		}
 		todo, err = b.app.updateTodo(act.ID, patch, actor)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
@@ -347,19 +333,8 @@ func (b *BridgeServer) handlePost(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "drop", "discard", "abandon":
-		if act.ID == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "id required"})
-			return
-		}
-		reason := act.Reason
-		if strings.TrimSpace(reason) == "" {
-			reason = act.DropReason
-		}
-		todo, err = b.app.dropTodo(act.ID, reason, actor)
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
-			return
-		}
+		writeJSON(w, http.StatusGone, map[string]any{"ok": false, "error": "丢弃操作已移除，仅在用户明确要求移出清单时使用 delete"})
+		return
 	case "delete":
 		if act.ID == "" {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "id required"})
@@ -383,8 +358,6 @@ func (b *BridgeServer) handlePost(w http.ResponseWriter, r *http.Request) {
 			prefix = "DSH 新增了任务："
 		case "complete", "done":
 			prefix = "DSH 完成了任务："
-		case "drop", "discard", "abandon":
-			prefix = "DSH 丢弃了任务："
 		}
 		b.app.toast("agent", prefix+todo.Title)
 	}
@@ -398,8 +371,8 @@ func (b *BridgeServer) handlePost(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *BridgeServer) stats() map[string]int {
-	open, done, dropped := b.app.todayStats()
-	return map[string]int{"open": open, "done": done, "dropped": dropped, "total": open + done + dropped}
+	open, done := b.app.todayStats()
+	return map[string]int{"open": open, "done": done, "total": open + done}
 }
 
 func randomToken() string {
