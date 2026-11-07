@@ -4,7 +4,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$assets = foreach ($name in 'TodoListAgent-Setup-win64.exe', 'TodoListAgent-win64.zip', 'TodoListAgent-android.apk') {
+$version = $Tag.Substring(1)
+$assets = foreach ($name in 'TodoListAgent-Setup-win64.exe', 'TodoListAgent-win64.zip', 'TodoListAgent-android.apk', "todolist-agent-dsh-connector-$version.tgz") {
   $file = Get-Item -LiteralPath (Join-Path $Directory $name)
   if ($file.PSIsContainer -or $file.Length -le 0 -or $file.Length -gt 128MB) {
     throw "Invalid release asset $name"

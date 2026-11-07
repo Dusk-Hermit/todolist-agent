@@ -102,7 +102,7 @@ TodoList Agent 把这一步搬到了桌面上：
 - **Microsoft Edge WebView2 Runtime**（Windows 11 通常自带）
 - 本机已安装并运行 **DeepSeek Harness**
 
-连接插件支持 **DSH 0.2.2 系列**（从 `0.2.2-rc.1` 起）。Android 端支持 Android 8.0 及以上的 arm64 和 x86-64 设备。
+连接插件已在 **DSH 0.2.2-rc.1** 验证。其他版本会尝试加载，插件页会显示宿主版本和会话服务状态。Android 端支持 Android 8.0 及以上的 arm64 和 x86-64 设备。
 
 ## 安装
 
@@ -115,7 +115,7 @@ TodoList Agent 把这一步搬到了桌面上：
 在每台负责处理消息的 Windows 电脑上，从同一 Release 下载 `todolist-agent-dsh-connector-<版本>.tgz`，用 DSH 自带的命令安装到正在使用的配置。以桌面版为例，在 PowerShell 运行以下命令。
 
 ```powershell
-dsh plugin --profile desktop add "C:\实际下载目录\todolist-agent-dsh-connector-0.4.13.tgz"
+dsh plugin --profile desktop add "C:\实际下载目录\todolist-agent-dsh-connector-0.4.14.tgz"
 ```
 
 使用 DSH Web 版时将 `desktop` 改为 `web`，自定义配置则填入自己的配置名。如果 `dsh` 不在 PATH，可以用 PowerShell 的 `&` 调用 DSH 安装目录下的 `resources\runtime\cli\bin\dsh.cmd`。安装后重启该 DSH 配置，再打开 TodoList Agent，或在设置里点「重新连接」。Android 通过配对电脑获取执行结果。
@@ -196,6 +196,8 @@ Windows 和 Android 启动时自动检查 GitHub Release，也可以在「设置
 插件的 `/todolist/v1/rpc` 接口负责列出、创建和重命名会话、提交文本消息及查询回执。`todolist/status` 根据原会话记录返回消息进入时间、轮次、结束原因和工具结果摘要。`todolist/wait` 订阅轮次结束事件，桌面端同时保留定期查询以便重连恢复。
 
 在 DSH 的「插件 → todolist-agent-dsh-connector」可选择模型后端、模型和推理强度。保存后，TodoList 下次发送时会把这些设置应用到所选会话。选择「跟随会话设置」则沿用该会话当前的模型。TodoList Windows 端只连接插件端口，Android 只连接配对电脑的局域网服务。
+
+同一页显示实际监听地址、版本、事件等待上限和近期运行日志。「检查更新」先读 GitHub Release 直链清单，「在线更新」找到新正式版后校验安装包的大小及 SHA-256，再安装到当前 DSH 配置。重启 DSH 后使用新版本。
 
 ### 专用会话
 

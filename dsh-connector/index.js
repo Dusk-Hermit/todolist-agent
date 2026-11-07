@@ -5,9 +5,9 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import z from '@deepseek-ai/schemastery';
 import { queuedInAgent, receiptFromEvents } from './receipt.js';
+import { registerManagement } from './management.js';
 
 export const name = 'todolist-agent-connector';
-export const inject = ['agents', 'llm', 'sessionController', 'sessionQuery'];
 export const Config = z.object({
   port: z.number().min(1024).max(65535).default(17892),
   discoveryFile: z.string(),
@@ -19,6 +19,7 @@ export const Config = z.object({
 const route = '/todolist/v1/rpc';
 const host = '127.0.0.1';
 const maxRequest = 2 * 1024 * 1024;
+const watchTimeout = 9000;
 const requestAAD = Buffer.from('todolist/v1/request');
 const responseAAD = Buffer.from('todolist/v1/response:');
 
@@ -62,7 +63,7 @@ async function waitForStatus(ctx, args, signal) {
   const dispose = ctx.on('session/event', (session, event) => {
     if (session.id === args.sessionId && event.type === 'turn/end') notify();
   }, { global: true });
-  const timeout = AbortSignal.any([signal, AbortSignal.timeout(9000)]);
+  const timeout = AbortSignal.any([signal, AbortSignal.timeout(watchTimeout)]);
   let stop;
   const expired = new Promise(resolve => { stop = resolve; });
   timeout.addEventListener('abort', stop, { once: true });
@@ -134,10 +135,38 @@ async function dispatch(ctx, config, method, args, signal) {
 export function apply(ctx, config = {}) {
   const port = config.port ?? 17892;
   const discoveryFile = config.discoveryFile ?? join(homedir(), '.dsh', 'todolist-connector.json');
-  if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid TodoList connector port');
   const key = randomBytes(32);
   const recent = new Map();
   const logger = ctx.logger('todolist-agent-connector');
+  const diagnostics = [];
+  let sessionContext;
+  let listening = false;
+  function record(level, code) {
+    const now = Date.now();
+    const last = diagnostics.at(-1);
+    if (last?.code === code && now - last.at < 10000) return;
+    diagnostics.push({ at: now, level, code });
+    if (diagnostics.length > 24) diagnostics.shift();
+  }
+  ctx.inject(['webServer', 'profileContext'], child => registerManagement(child, () => ({
+    host, port, route, watchTimeout, maxRequest, listening, sessionAPI: !!sessionContext,
+    diagnostics,
+  }), record));
+  ctx.inject(['agents', 'llm', 'sessionController', 'sessionQuery'], child => {
+    const required = ['list', 'create', 'rename', 'prompt', 'resolveAgent'];
+    if (required.some(method => typeof child.sessionController[method] !== 'function') ||
+        typeof child.sessionQuery.observeSession !== 'function' || typeof child.agents.get !== 'function' ||
+        typeof child.llm.resolveCallConfig !== 'function') {
+      record('error', 'DSH_SESSION_API_UNAVAILABLE');
+      return;
+    }
+    sessionContext = child;
+    child.on('dispose', () => { sessionContext = undefined; });
+  });
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+    record('error', 'CONNECTOR_PORT_INVALID');
+    return;
+  }
   const server = createServer({ requestTimeout: 10000 }, async (req, res) => {
     if (req.method !== 'POST' || req.url !== route || req.headers.host !== host + ':' + port ||
         req.headers['content-type'] !== 'application/octet-stream') {
@@ -173,9 +202,14 @@ export function apply(ctx, config = {}) {
     res.once('close', () => abort.abort());
     let result;
     try {
-      const value = await dispatch(ctx, config, request.method, request.args?.request ?? request.args?._request, abort.signal);
+      if (!sessionContext) throw Object.assign(new Error('DSH session services are unavailable'), { code: 'connector/session-api-unavailable' });
+      const value = await dispatch(sessionContext, config, request.method, request.args?.request ?? request.args?._request, abort.signal);
       result = { ok: true, value };
     } catch (error) {
+      if (!abort.signal.aborted) {
+        const code = typeof error?.code === 'string' && /^[\w./-]{1,80}$/.test(error.code) ? error.code : 'CONNECTOR_RPC_ERROR';
+        record('error', code);
+      }
       result = { ok: false, error: { code: error.code ?? 'connector/internal', message: String(error.message) } };
     }
     if (!res.destroyed) {
@@ -183,15 +217,21 @@ export function apply(ctx, config = {}) {
       res.end(encrypt(key, packet.subarray(0, 12), { result }));
     }
   });
-  server.on('error', error => logger.error('Could not listen on %s:%d: %s', host, port, error.message));
+  server.on('error', error => {
+    record('error', error.code === 'EADDRINUSE' ? 'CONNECTOR_PORT_IN_USE' : 'CONNECTOR_LISTEN_FAILED');
+    logger.error('Could not listen on %s:%d: %s', host, port, error.message);
+  });
   server.listen(port, host, async () => {
     const temp = discoveryFile + '.' + randomBytes(8).toString('hex') + '.tmp';
     try {
       await mkdir(dirname(discoveryFile), { recursive: true, mode: 0o700 });
       await writeFile(temp, JSON.stringify({ version: 1, port, key: key.toString('base64') }), { mode: 0o600, flag: 'wx' });
       await rename(temp, discoveryFile);
+      listening = true;
+      record('info', 'CONNECTOR_READY');
       logger.info('TodoList connector listening on %s:%d', host, port);
     } catch (error) {
+      record('error', 'CONNECTOR_DISCOVERY_WRITE_FAILED');
       await unlink(temp).catch(() => {});
       logger.error('Could not publish TodoList connector endpoint: %s', error.message);
       server.close();

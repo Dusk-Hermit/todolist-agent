@@ -11,14 +11,91 @@ window.__ModuleLoader__.load({
         adapter: '模型默认', save: '保存', saved: '已保存', loading: '正在读取模型和设置…',
         scope: '这些设置应用于 TodoList Agent 发消息时使用的 DSH 会话。',
         unavailable: '当前配置无法修改此插件的设置。',
+        connector: '连接信息与更新', port: '监听地址', rpc: '接口路径', versions: '插件 / DSH / 已验证 DSH',
+        limits: '单次事件等待 / 请求上限', state: '服务状态', ready: '运行中', degraded: '服务未就绪',
+        check: '检查更新', upgrade: '在线更新', current: '已是最新版本', restart: '已安装，重启 DSH 后生效',
+        available: '可更新到', logs: '运行日志', empty: '暂无记录', suggestion: '建议检查插件更新',
+        managementUnavailable: '更新和诊断接口暂不可用，请重新打开 DSH 页面。',
       },
       en: {
         provider: 'Model provider', model: 'Model', effort: 'Reasoning effort', inherited: 'Use session settings',
         adapter: 'Model default', save: 'Save', saved: 'Saved', loading: 'Loading models and settings…',
         scope: 'These settings apply to the DSH session when TodoList Agent sends a message.',
         unavailable: 'This profile does not allow editing the connector settings.',
+        connector: 'Connection and updates', port: 'Listening address', rpc: 'RPC path', versions: 'Connector / DSH / tested DSH',
+        limits: 'Event wait / request limit', state: 'Service status', ready: 'Running', degraded: 'Service unavailable',
+        check: 'Check for updates', upgrade: 'Update online', current: 'Up to date', restart: 'Installed. Restart DSH to apply.',
+        available: 'Update available', logs: 'Runtime log', empty: 'No entries', suggestion: 'Check for connector updates',
+        managementUnavailable: 'Update and diagnostics are unavailable. Reopen the DSH page.',
       },
     };
+
+    async function manage(action = '') {
+      const config = window.__TodoListConnectorManagement;
+      if (!config) throw new Error('Connector management unavailable');
+      const response = await fetch(config.endpoint + (action ? '/' + action : ''), {
+        method: action ? 'POST' : 'GET', headers: { Authorization: 'Bearer ' + config.token },
+      });
+      if (response.status === 401) throw new Error('Connector management token expired');
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error);
+      return result;
+    }
+
+    function Management({ t }) {
+      const [info, setInfo] = React.useState(null);
+      const [busy, setBusy] = React.useState(false);
+      const [notice, setNotice] = React.useState('');
+      React.useEffect(() => {
+        let mounted = true;
+        const refresh = () => manage().then(result => { if (mounted) setInfo(result); })
+          .catch(() => { if (mounted) setInfo(null); });
+        refresh();
+        const timer = setInterval(refresh, 5000);
+        return () => { mounted = false; clearInterval(timer); };
+      }, []);
+      async function update(install) {
+        setBusy(true);
+        setNotice('');
+        try {
+          const { available } = await manage('check');
+          if (!available) setNotice(t('current'));
+          else if (!install) setNotice(t('available') + ' ' + available);
+          else {
+            await manage('install');
+            setNotice(t('restart'));
+          }
+          setInfo(await manage());
+        } catch (error) {
+          setNotice(error.message);
+          await manage().then(setInfo).catch(() => {});
+        } finally {
+          setBusy(false);
+        }
+      }
+      const entries = info ? [
+        [t('port'), info.host + ':' + info.port],
+        [t('rpc'), info.route],
+        [t('versions'), [info.version, info.runtime || '—', info.testedDSH].join(' / ')],
+        [t('limits'), (info.watchTimeout / 1000) + ' s / ' + (info.maxRequest / 1024 / 1024) + ' MiB'],
+        [t('state'), info.listening && info.sessionAPI ? t('ready') : t('degraded')],
+      ] : [];
+      return h('section', { style: { marginBlock: 16 } },
+        h('h3', null, t('connector')),
+        info ? h('dl', null, entries.map(([label, value]) =>
+          h('div', { key: label, style: { display: 'flex', gap: 12, flexWrap: 'wrap' } },
+            h('dt', null, label), h('dd', { style: { margin: 0 } }, value))))
+          : h('p', { role: 'status' }, t('managementUnavailable')),
+        h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
+          h(Button, { disabled: busy || !info, onClick: () => update(false) }, t('check')),
+          h(Button, { variant: 'primary', disabled: busy || !info, onClick: () => update(true) }, t('upgrade'))),
+        h('p', { role: 'status' }, notice || (info?.staged ? t('restart') : '')),
+        info && (!info.listening || !info.sessionAPI || (info.runtime && info.runtime !== info.testedDSH) ||
+          info.diagnostics.some(entry => entry.level === 'error')) && h('p', null, t('suggestion')),
+        info && h('details', { open: true }, h('summary', null, t('logs')),
+          h('pre', { style: { maxHeight: 180, overflow: 'auto', whiteSpace: 'pre-wrap' } },
+            info.diagnostics.map(entry => new Date(entry.at).toLocaleTimeString() + '  ' + entry.level + '  ' + entry.code).join('\n') || t('empty'))));
+    }
 
     function Form({ remote, t }) {
       const [form, setForm] = React.useState(null);
@@ -84,12 +161,14 @@ window.__ModuleLoader__.load({
     }
 
     return {
-      inject: ['slots', 'locale', 'remote', 'remote.settings', 'remote.session'],
+      inject: ['slots', 'locale'],
       apply(ctx) {
+        let remote;
+        ctx.inject(['remote', 'remote.settings', 'remote.session'], child => { remote = child.remote; });
         ctx.effect(() => ctx.locale.register(namespace, messages));
         ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
           name: 'plugins.bundle.config', key: 'todolist-agent-dsh-connector', locale: namespace,
-        }, ({ t }) => h(Form, { remote: ctx.remote, t })));
+        }, ({ t }) => h(React.Fragment, null, h(Management, { t }), remote && h(Form, { remote, t }))));
       },
     };
   },

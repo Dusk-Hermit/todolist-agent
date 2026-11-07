@@ -76,6 +76,7 @@ type lanService struct {
 	peers              []lanPeer
 	discovered         map[string]lanSighting
 	wake               chan struct{}
+	syncNotices        chan lanSyncNotice
 	discovery          *lanDiscovery
 	workers            sync.WaitGroup
 }
@@ -84,6 +85,10 @@ type lanSighting struct {
 	address string
 	at      time.Time
 	syncAt  int64
+}
+
+type lanSyncNotice struct {
+	id, address string
 }
 
 func pairingTLS(code string) (*tls.Config, *tls.Config, error) {
@@ -140,6 +145,7 @@ func newLAN(a *App, cfg lanConfig, id string, port int) (*lanService, error) {
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		},
 		discovered: make(map[string]lanSighting), wake: make(chan struct{}, 1),
+		syncNotices: make(chan lanSyncNotice, 8),
 	}
 	s.discovery = newLANDiscovery(s)
 	mux := http.NewServeMux()
@@ -179,15 +185,36 @@ func (s *lanService) close() {
 func (s *lanService) run() {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
+	s.refresh(false)
 	for {
-		s.refresh(false)
 		select {
 		case <-s.ctx.Done():
 			return
+		case notice := <-s.syncNotices:
+			s.syncNotifiedPeer(notice)
 		case <-ticker.C:
+			s.refresh(false)
 		case <-s.wake:
+			s.refresh(false)
 		}
 	}
+}
+
+func (s *lanService) syncNotifiedPeer(notice lanSyncNotice) {
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+	if s.ctx.Err() != nil {
+		return
+	}
+	for _, peer := range s.availablePeers() {
+		if peer.ID == notice.id && peer.Address == notice.address && !peer.NeedsUpgrade {
+			// The sender just settled a batch. Its cached Paused flag can be
+			// stale; the authenticated sync endpoint checks its current state.
+			_ = s.exchange(peer)
+			return
+		}
+	}
+	s.signal()
 }
 
 func (s *lanService) signal() {

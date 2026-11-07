@@ -142,3 +142,26 @@ func TestLivePromptWindowExtendsOnceWhenBacklogArrives(t *testing.T) {
 		t.Fatal("more backlog postponed an already-open collection window")
 	}
 }
+
+func TestBatchNoticeSyncsKnownPeerWithStalePauseState(t *testing.T) {
+	phone, desktop := isolatedApp(t), isolatedApp(t)
+	if _, err := desktop.bindingAddTodo(TodoInput{Title: "DSH result"}); err != nil {
+		t.Fatal(err)
+	}
+	code := randomToken()
+	start := func(app *App) *lanService {
+		s, err := newLAN(app, lanConfig{Code: code}, app.replicaSnapshot().Device, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(s.close)
+		return s
+	}
+	sender, receiver := start(desktop), start(phone)
+	address := fmt.Sprintf("127.0.0.1:%d", sender.port)
+	receiver.peers = []lanPeer{{ID: sender.id, Address: address, Paused: true}}
+	receiver.syncNotifiedPeer(lanSyncNotice{id: sender.id, address: address})
+	if todos := phone.snapshot().Todos; len(todos) != 1 || todos[0].Title != "DSH result" {
+		t.Fatalf("completion notice did not pull the result: %+v", todos)
+	}
+}

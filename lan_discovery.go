@@ -174,8 +174,14 @@ func (d *lanDiscovery) listen(socket *net.UDPConn) {
 		now := time.Now()
 		isNew, reply := s.recordSighting(a.ID, address, a.Announce, now)
 		notify := s.acceptSyncNotice(a.ID, address, a.SyncAt, now)
-		if isNew || notify {
+		if isNew {
 			s.signal()
+		} else if notify {
+			select {
+			case s.syncNotices <- lanSyncNotice{id: a.ID, address: address}:
+			default:
+				s.signal()
+			}
 		}
 		if reply {
 			d.announce(false)

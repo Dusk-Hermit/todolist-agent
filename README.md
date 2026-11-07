@@ -100,7 +100,7 @@ Every message sent from the desktop composer is stored as a **journal entry**, e
 - **Microsoft Edge WebView2 Runtime** (normally included with Windows 11)
 - **DeepSeek Harness** installed and running locally
 
-The connector supports **DSH 0.2.2**, starting with `0.2.2-rc.1`. The Android app supports Android 8.0 or later on arm64 and x86-64.
+The connector is tested on **DSH 0.2.2-rc.1**. Other versions attempt to load and show the host version and session service status in the plugin page. The Android app supports Android 8.0 or later on arm64 and x86-64.
 
 ## Install
 
@@ -113,7 +113,7 @@ Download and run `TodoListAgent-Setup-win64.exe` from [GitHub Releases](https://
 On each Windows computer that handles prompts, download `todolist-agent-dsh-connector-<version>.tgz` from the same release and install it into the DSH profile you use. For DSH Desktop, run this in PowerShell.
 
 ```powershell
-dsh plugin --profile desktop add "C:\path\to\todolist-agent-dsh-connector-0.4.13.tgz"
+dsh plugin --profile desktop add "C:\path\to\todolist-agent-dsh-connector-0.4.14.tgz"
 ```
 
 Use `web` for the DSH Web profile or specify your custom profile name. If `dsh` is outside PATH, use PowerShell's `&` to run `resources\runtime\cli\bin\dsh.cmd` inside the DSH installation folder. Restart the selected DSH profile and reopen TodoList Agent or click **重新连接** in its settings. Android receives execution results from the paired computer.
@@ -194,6 +194,8 @@ The plugin listens on `127.0.0.1:17892` by default. To change the port, set `con
 The versioned `/todolist/v1/rpc` endpoint allows session listing, creation, and renaming, text prompt submission, and receipt lookups. `todolist/status` reports the time the message entered the session, turn number, end reason, and tool outcomes. `todolist/wait` listens for turn completion. The Windows app also keeps periodic receipt checks for recovery.
 
 Choose a model provider, model, and reasoning effort under **Plugins → todolist-agent-dsh-connector** in DSH. The next TodoList prompt applies those settings to the linked session. **Use session settings** follows the session's current model. TodoList for Windows connects only to the plugin endpoint, and Android connects to the paired PC's LAN service.
+
+The same page shows the listening address, versions, event wait limit, and recent runtime diagnostics. **Check for updates** reads the direct GitHub Release manifest first. **Update online** verifies the package size and SHA-256, then installs a newer stable release into the active DSH profile. Restart DSH to activate it.
 
 ### The dedicated session
 
