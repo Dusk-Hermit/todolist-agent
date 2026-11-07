@@ -1,6 +1,6 @@
 {
   "name": "todolist-agent-dsh-connector",
-  "version": "0.4.14",
+  "version": "0.4.15",
   "description": "Local DeepSeek Harness connector for TodoList Agent",
   "license": "MIT",
   "type": "module",

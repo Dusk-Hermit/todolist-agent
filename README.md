@@ -113,7 +113,7 @@ Download and run `TodoListAgent-Setup-win64.exe` from [GitHub Releases](https://
 On each Windows computer that handles prompts, download `todolist-agent-dsh-connector-<version>.tgz` from the same release and install it into the DSH profile you use. For DSH Desktop, run this in PowerShell.
 
 ```powershell
-dsh plugin --profile desktop add "C:\path\to\todolist-agent-dsh-connector-0.4.14.tgz"
+dsh plugin --profile desktop add "C:\path\to\todolist-agent-dsh-connector-0.4.15.tgz"
 ```
 
 Use `web` for the DSH Web profile or specify your custom profile name. If `dsh` is outside PATH, use PowerShell's `&` to run `resources\runtime\cli\bin\dsh.cmd` inside the DSH installation folder. Restart the selected DSH profile and reopen TodoList Agent or click **重新连接** in its settings. Android receives execution results from the paired computer.

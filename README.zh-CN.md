@@ -115,7 +115,7 @@ TodoList Agent 把这一步搬到了桌面上：
 在每台负责处理消息的 Windows 电脑上，从同一 Release 下载 `todolist-agent-dsh-connector-<版本>.tgz`，用 DSH 自带的命令安装到正在使用的配置。以桌面版为例，在 PowerShell 运行以下命令。
 
 ```powershell
-dsh plugin --profile desktop add "C:\实际下载目录\todolist-agent-dsh-connector-0.4.14.tgz"
+dsh plugin --profile desktop add "C:\实际下载目录\todolist-agent-dsh-connector-0.4.15.tgz"
 ```
 
 使用 DSH Web 版时将 `desktop` 改为 `web`，自定义配置则填入自己的配置名。如果 `dsh` 不在 PATH，可以用 PowerShell 的 `&` 调用 DSH 安装目录下的 `resources\runtime\cli\bin\dsh.cmd`。安装后重启该 DSH 配置，再打开 TodoList Agent，或在设置里点「重新连接」。Android 通过配对电脑获取执行结果。
