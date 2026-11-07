@@ -6,7 +6,7 @@ const { version } = createRequire(import.meta.url)('./package.json');
 const testedDSH = '0.2.2-rc.1';
 const endpoint = '/todolist-connector/manage';
 
-export function registerManagement(ctx, info, record) {
+export function registerManagement(ctx, info, record, backends) {
   const token = randomBytes(32).toString('hex');
   const auth = Buffer.from('Bearer ' + token);
   let runtime = '';
@@ -38,7 +38,7 @@ export function registerManagement(ctx, info, record) {
         send(200, { ...info(), version, runtime, testedDSH, available: offer?.version, staged });
         return;
       }
-      if (req.method !== 'POST' || ![endpoint + '/check', endpoint + '/install'].includes(req.url)) {
+      if (req.method !== 'POST' || ![endpoint + '/check', endpoint + '/install', endpoint + '/backend'].includes(req.url)) {
         send(404, { error: 'Unknown action' });
         return;
       }
@@ -49,7 +49,20 @@ export function registerManagement(ctx, info, record) {
       busy = true;
       const checking = req.url.endsWith('/check');
       try {
-        if (checking) {
+        if (req.url.endsWith('/backend')) {
+          let body = '';
+          for await (const chunk of req) {
+            body += chunk;
+            if (body.length > 2048) throw new Error('Backend request too large');
+          }
+          const request = JSON.parse(body);
+          if (typeof request.clientID !== 'string' || !/^[\w.-]{1,160}$/.test(request.clientID) ||
+              (request.sessionId !== undefined && (typeof request.sessionId !== 'string' || !/^[\w.-]{1,160}$/.test(request.sessionId)))) {
+            throw new Error('Invalid backend selection');
+          }
+          const value = await backends.change(request.clientID, request.sessionId, AbortSignal.timeout(25000));
+          send(200, value);
+        } else if (checking) {
           offer = undefined;
           offer = await checkUpdate(version);
           send(200, { available: offer?.version });
@@ -60,7 +73,7 @@ export function registerManagement(ctx, info, record) {
           send(200, { staged });
         }
       } catch (error) {
-        record('error', checking ? 'UPDATE_CHECK_FAILED' : 'UPDATE_INSTALL_FAILED');
+        record('error', req.url.endsWith('/backend') ? 'BACKEND_CHANGE_FAILED' : checking ? 'UPDATE_CHECK_FAILED' : 'UPDATE_INSTALL_FAILED');
         send(502, { error: error.message });
       } finally {
         busy = false;

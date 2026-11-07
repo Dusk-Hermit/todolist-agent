@@ -63,10 +63,6 @@ func createMainWindow(a *App) webview2.WebView {
 		"todo_connectDSH":      a.bindingConnectDSH,
 		"todo_refreshSessions": a.bindingRefreshSessions,
 		"todo_recheckPrompts":  a.bindingRecheckPrompts,
-		"todo_selectSession":   a.bindingSelectSession,
-		"todo_newSession":      a.bindingNewSession,
-		"todo_sendOnboarding":  a.bindingSendOnboarding,
-		"todo_writeAgents":     a.bindingWriteAgents,
 		"todo_diagnostics":     a.bindingDiagnostics,
 		"todo_quit":            a.bindingQuit,
 		"todo_lanState":        a.bindingLANState,
@@ -221,11 +217,10 @@ func (a *App) bindingWindowAction(action string) map[string]any {
 	return map[string]any{"ok": true}
 }
 
-func (a *App) bindingConnectDSH(sessionID string) map[string]any {
+func (a *App) bindingConnectDSH() map[string]any {
 	if a.dsh == nil {
 		return map[string]any{"ok": false, "error": "DSH 客户端尚未启动"}
 	}
-	a.dsh.SelectSession(sessionID)
 	a.dsh.Wake()
 	return map[string]any{"ok": true}
 }
@@ -241,43 +236,6 @@ func (a *App) bindingRecheckPrompts() {
 	if a.dsh != nil {
 		a.dsh.Wake()
 	}
-}
-
-func (a *App) bindingSelectSession(id string) map[string]any {
-	if a.dsh == nil {
-		return map[string]any{"ok": false, "error": "DSH 客户端尚未启动"}
-	}
-	a.dsh.SelectSession(id)
-	return map[string]any{"ok": true}
-}
-
-func (a *App) bindingNewSession() map[string]any {
-	if a.dsh == nil {
-		return map[string]any{"ok": false, "error": "DSH 客户端尚未启动"}
-	}
-	a.dsh.NewDedicatedSession()
-	return map[string]any{"ok": true}
-}
-
-func (a *App) bindingSendOnboarding() (map[string]any, error) {
-	if a.dsh == nil {
-		return nil, fmt.Errorf("DSH 客户端尚未启动")
-	}
-	text := a.dsh.OnboardingText()
-	id, err := a.dsh.SendPrompt(text, true)
-	if err != nil {
-		return nil, err
-	}
-	return map[string]any{"ok": true, "id": id}, nil
-}
-
-func (a *App) bindingWriteAgents() map[string]any {
-	path, err := a.writeAgentsBlock()
-	if err != nil {
-		return map[string]any{"ok": false, "error": err.Error()}
-	}
-	a.toast("success", "已写入 "+path)
-	return map[string]any{"ok": true, "path": path}
 }
 
 func (a *App) bindingDiagnostics() string {

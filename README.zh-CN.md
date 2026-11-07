@@ -40,7 +40,7 @@ TodoList Agent 把这一步搬到了桌面上：
 ### 真正的 DSH 会话，而不是单向表单
 
 - 自动连接本机 DSH 的 TodoList 插件。
-- 首次启动时创建并选中专用会话 `TodoList · DSH 联动`，之后持续复用。
+- DSH 插件自动创建并初始化处理会话，之后持续复用。
 - 你发出的内容会作为普通用户消息进入 DSH，Agent 能看到完整上下文并正常回复。
 - DSH 可以通过本地桥接接口新增、修改、开始、完成、重新打开和删除任务。
 
@@ -115,7 +115,7 @@ TodoList Agent 把这一步搬到了桌面上：
 在每台负责处理消息的 Windows 电脑上，从同一 Release 下载 `todolist-agent-dsh-connector-<版本>.tgz`，用 DSH 自带的命令安装到正在使用的配置。以桌面版为例，在 PowerShell 运行以下命令。
 
 ```powershell
-dsh plugin --profile desktop add "C:\实际下载目录\todolist-agent-dsh-connector-0.4.15.tgz"
+dsh plugin --profile desktop add "C:\实际下载目录\todolist-agent-dsh-connector-0.4.16.tgz"
 ```
 
 使用 DSH Web 版时将 `desktop` 改为 `web`，自定义配置则填入自己的配置名。如果 `dsh` 不在 PATH，可以用 PowerShell 的 `&` 调用 DSH 安装目录下的 `resources\runtime\cli\bin\dsh.cmd`。安装后重启该 DSH 配置，再打开 TodoList Agent，或在设置里点「重新连接」。Android 通过配对电脑获取执行结果。
@@ -128,9 +128,8 @@ dsh plugin --profile desktop add "C:\实际下载目录\todolist-agent-dsh-conne
 
 1. 启动 **DeepSeek Harness**。
 2. 启动 **TodoList Agent**。
-3. 应用会自动连接 DSH 插件，并选中或创建专用会话 `TodoList · DSH 联动`。
-4. 点击一次 **「让 DSH 维护这份清单」**，发送接入说明。它会告诉 DSH 本地接口地址、Token 和任务处理规则。
-5. 可以选择写入 `AGENTS.local.md`，让长时间运行的 DSH 会话在上下文压缩后仍然记得这些规则。
+3. 应用连接插件并注册本机清单接口。插件创建处理会话，自动发送初始化提示词。
+4. 初始化轮次成功结束后，插件开始接收队列中的日常消息。在 DSH 插件页可以查看初始化状态、新建或切换处理会话。
 
 之后：
 
@@ -193,7 +192,7 @@ Windows 和 Android 启动时自动检查 GitHub Release，也可以在「设置
 
 插件默认绑定 `127.0.0.1:17892`。需要换端口时，在当前 DSH 配置的 `cordis.patch.yml` 中将插件行 `todolist-agent-connector` 的 `config.port` 改成指定端口。插件将实际端口和每次启动生成的连接密钥写入 `%USERPROFILE%\.dsh\todolist-connector.json`。桌面端只访问这个端口，请求和回执均加密并校验身份。请将这个文件保留在自己的 Windows 账户中。
 
-插件的 `/todolist/v1/rpc` 接口负责列出、创建和重命名会话、提交文本消息及查询回执。`todolist/status` 根据原会话记录返回消息进入时间、轮次、结束原因和工具结果摘要。`todolist/wait` 订阅轮次结束事件，桌面端同时保留定期查询以便重连恢复。
+插件的 `/todolist/v1/rpc` 接口负责注册清单接口、分配处理会话、提交文本消息及查询回执。`todolist/status` 根据原会话记录返回消息进入时间、轮次、结束原因和工具结果摘要。`todolist/wait` 订阅轮次结束事件，桌面端同时保留定期查询以便重连恢复。
 
 在 DSH 的「插件 → todolist-agent-dsh-connector」可选择模型后端、模型和推理强度。保存后，TodoList 下次发送时会把这些设置应用到所选会话。选择「跟随会话设置」则沿用该会话当前的模型。TodoList Windows 端只连接插件端口，Android 只连接配对电脑的局域网服务。
 
@@ -201,13 +200,13 @@ Windows 和 Android 启动时自动检查 GitHub Release，也可以在「设置
 
 ### 专用会话
 
-如果没有已保存的专用会话，应用调用 `session/create` 创建新会话，重命名为 `TodoList · DSH 联动` 并选中。会话工作目录优先跟随当前正在运行的 DSH 会话；没有运行中的会话时，使用最近活跃会话的目录。
+处理会话由 DSH 插件保存于当前 DSH 配置的 `todolist-backends.json`。初始化规则位于插件包的 `prompt.md`，插件按内容指纹识别变更。升级只有规则内容发生变化时才创建并初始化新会话。桥接地址、鉴权或工作目录变化也会启用新会话。
 
-应用不会劫持你正在使用的会话。设置页提供 **「新建专用会话」**。
+在 DSH 插件页可「新建并初始化处理会话」，也可选用规则与接口配置相符的历史处理会话。初始化失败会显示错误，日常消息留在 Windows 待发队列。已分配消息的原会话归属会持久保存，切换和重启后仍按原会话核对执行结果。Windows 与插件应一同升级到 0.4.16。
 
 ### 发送一条想法
 
-输入框通过 `session/prompt` 发送普通消息。消息末尾会附带一个隐藏标记：
+Windows 先通过 `todolist/prepare` 获取插件保存的消息归属，再通过 `todolist/prompt` 提交普通消息。消息末尾会附带一个隐藏标记：
 
 ```html
 <!-- todo-msg:<id> -->
@@ -312,7 +311,7 @@ Android 开发时在 Android Studio 打开 `android/`。使用 JDK 17、Gradle 8
 ```text
 app.go        应用状态、任务操作、快照
 store.go      持久化与迁移
-dsh.go        DSH 发现、专用会话、消息发送
+dsh.go        DSH 插件连接、消息投递与执行回执
 bridge.go     DSH 使用的本地回环接口
 window_windows.go   WebView2 绑定与窗口生命周期
 win32_windows.go    Windows 标题栏、图标和窗口行为

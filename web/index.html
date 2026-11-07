@@ -129,17 +129,7 @@
     <button class="ghost-btn" id="emptyAdd">手动添加第一个任务</button>
   </section>
 
-  <section class="setup hidden" id="setupBanner">
-    <div class="setup-icon"><svg class="icon"><use href="#i-spark"/></svg></div>
-    <div class="setup-copy">
-      <b>让 DSH 维护这份清单</b>
-      <span>发送一次接入说明，之后它会自动拆分、更新和完成任务。</span>
-    </div>
-    <button class="primary-btn small" id="setupBtn">启用</button>
-    <button class="icon-btn subtle" id="setupDismiss" aria-label="稍后">
-      <svg class="icon"><use href="#i-close"/></svg>
-    </button>
-  </section>
+
 
   <section class="composer-wrap">
     <div class="composer" id="composer">
@@ -318,26 +308,11 @@
         <div class="kv-status" id="connStatus">
           <span class="dot"></span><span id="connStatusText">正在连接…</span>
         </div>
-        <div class="field">
-          <span>目标会话</span>
-          <div class="select-row">
-            <select id="sessionSelect"></select>
-            <button class="icon-btn" id="refreshSessions" title="刷新会话列表" aria-label="刷新会话列表">
-              <svg class="icon"><use href="#i-refresh"/></svg>
-            </button>
-          </div>
-        </div>
+        <p class="field-hint" id="backendSession"></p>
         <div class="button-row">
           <button class="primary-btn" id="connectBtn">重新连接</button>
-          <button class="ghost-btn" id="newSessionBtn">新建专用会话</button>
-          <button class="ghost-btn" id="onboardBtn"><svg class="icon"><use href="#i-spark"/></svg> 让 DSH 管理清单</button>
         </div>
-        <label class="toggle-row">
-          <input type="checkbox" id="writeAgents">
-          <span class="toggle"></span>
-          <span class="toggle-copy"><b>写入工作区 AGENTS.local.md</b><small>让 DSH 在长会话/压缩后仍记得任务接口</small></span>
-        </label>
-        <p class="field-hint" id="connHint">默认通过本机 TodoList 连接插件访问 DSH 和核对执行状态。</p>
+        <p class="field-hint" id="connHint">处理会话和初始化提示词由 DSH 插件管理，可在 DSH 插件页新建或切换。</p>
       </section>
 
       <section class="settings-section">
@@ -402,7 +377,7 @@
 
       <section class="settings-section about">
         <div class="section-title"><span class="section-index">05</span> 关于</div>
-        <p><b>TodoList Agent <span id="aboutVersion">0.4.15</span></b></p>
+        <p><b>TodoList Agent <span id="aboutVersion">0.4.16</span></b></p>
         <p class="desktop-only">桌面清单通过 DSH 的本地 Web API 向当前会话发送输入，并接收 DSH 对任务的修改。</p>
         <p class="mobile-only">任务和待发消息会保存在手机上。配对后，手机通过局域网同步任务，并将待发消息交给电脑处理。</p>
         <p class="field-hint" id="updateStatus" aria-live="polite"></p>

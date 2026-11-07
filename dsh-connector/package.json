@@ -1,12 +1,12 @@
 {
   "name": "todolist-agent-dsh-connector",
-  "version": "0.4.15",
+  "version": "0.4.16",
   "description": "Local DeepSeek Harness connector for TodoList Agent",
   "license": "MIT",
   "type": "module",
   "main": "./index.js",
   "exports": { ".": "./index.js", "./client": "./client.js", "./package.json": "./package.json" },
-  "files": ["index.js", "client.js", "receipt.js", "updates.js", "management.js", "cordis.patch.yml"],
+  "files": ["index.js", "client.js", "receipt.js", "updates.js", "management.js", "backends.js", "prompt.md", "cordis.patch.yml"],
   "peerDependencies": { "@deepseek-ai/schemastery": "~3.19.0" },
   "dsh": { "bundle": { "patch": "./cordis.patch.yml" }, "client": { "platform": "web" } },
   "scripts": { "test": "node --test" }

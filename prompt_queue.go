@@ -224,8 +224,17 @@ func (c *DSHClient) pumpQueue(ctx context.Context, selected *sessionRow, session
 		return
 	}
 	item := orderedQueue(a.state.Queue)[0]
-	active = &activePrompt{queuedPrompt: item, Session: selected.SessionID,
-		Started: time.Now().UnixMilli(), PreviousSeq: selected.Projections.AsOfSeq}
+	a.mu.Unlock()
+	session, err := c.preparePrompt(ctx, item.ID)
+	if err != nil {
+		return
+	}
+	a.mu.Lock()
+	if a.state.ActivePrompt != nil || a.quitting || a.state.Queue[item.ID].ID != item.ID {
+		a.mu.Unlock()
+		return
+	}
+	active = &activePrompt{queuedPrompt: item, Session: session, Started: time.Now().UnixMilli()}
 	next := a.state
 	next.Queue = maps.Clone(next.Queue)
 	delete(next.Queue, item.ID)
@@ -241,15 +250,16 @@ func (c *DSHClient) pumpQueue(ctx context.Context, selected *sessionRow, session
 		next.Messages = append(next.Messages, message)
 	}
 	slices.SortFunc(next.Messages, compareMessages)
-	err := a.persistLocked(next)
+	err = a.persistLocked(next)
 	a.mu.Unlock()
 	if err != nil {
 		return
 	}
 	a.emitState()
 
-	raw, err := c.call(ctx, "session/prompt", promptArgs(item.ID, active.Session,
-		todoPromptText(item.Text, item.ID)))
+	args := promptArgs(item.ID, item.Text)
+	args["request"].(map[string]any)["clientID"] = a.replicaSnapshot().Device
+	raw, err := c.call(ctx, "todolist/prompt", args)
 	if err != nil {
 		var rejected *rpcError
 		if errors.As(err, &rejected) && rejected.Code == "connector/model-unavailable" {
@@ -303,16 +313,12 @@ func (c *DSHClient) reconcileUncertain(ctx context.Context) {
 	}
 }
 
-func promptArgs(id, session, text string) map[string]any {
+func promptArgs(id, text string) map[string]any {
 	return map[string]any{"request": map[string]any{
-		"requestId": id, "sessionId": session, "mode": "queue",
+		"requestId": id, "mode": "queue",
 		"content":        []map[string]any{{"type": "text", "text": text}},
 		"clientTimeZone": clientTimeZone(),
 	}}
-}
-
-func todoPromptText(text, id string) string {
-	return text + "\n\n<!-- TodoList 排序规则：" + todoPlacementRule + " -->\n<!-- todo-msg:" + id + " -->"
 }
 
 func (a *App) markPromptAccepted(active *activePrompt) {

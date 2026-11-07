@@ -40,7 +40,7 @@ The Windows app sends messages to the running DSH through the local TodoList con
 ### A real DSH conversation, not a one-way form
 
 - The app connects to the TodoList connector in the local DSH instance.
-- On first launch it creates a dedicated session named `TodoList · DSH 联动` and reuses it later.
+- The DSH connector creates and initializes a processing session, then reuses it.
 - Messages you send appear in DSH as normal user messages, so the agent sees the full context and can reply.
 - DSH can add, update, start, complete, reopen, and delete tasks through the local bridge API.
 
@@ -113,7 +113,7 @@ Download and run `TodoListAgent-Setup-win64.exe` from [GitHub Releases](https://
 On each Windows computer that handles prompts, download `todolist-agent-dsh-connector-<version>.tgz` from the same release and install it into the DSH profile you use. For DSH Desktop, run this in PowerShell.
 
 ```powershell
-dsh plugin --profile desktop add "C:\path\to\todolist-agent-dsh-connector-0.4.15.tgz"
+dsh plugin --profile desktop add "C:\path\to\todolist-agent-dsh-connector-0.4.16.tgz"
 ```
 
 Use `web` for the DSH Web profile or specify your custom profile name. If `dsh` is outside PATH, use PowerShell's `&` to run `resources\runtime\cli\bin\dsh.cmd` inside the DSH installation folder. Restart the selected DSH profile and reopen TodoList Agent or click **重新连接** in its settings. Android receives execution results from the paired computer.
@@ -126,9 +126,8 @@ Use `web` for the DSH Web profile or specify your custom profile name. If `dsh` 
 
 1. Start **DeepSeek Harness**.
 2. Launch **TodoList Agent**.
-3. The app connects to the DSH plugin and selects or creates the dedicated session `TodoList · DSH 联动`.
-4. Click **让 DSH 维护这份清单** once and send the onboarding message. This gives DSH the local bridge URL, token, and the task-handling rules.
-5. Optionally let the app write the managed block into `AGENTS.local.md`, so a long-running DSH session keeps the rules after compaction.
+3. The app registers its local task bridge with the connector, which creates a processing session and sends its initialization prompt.
+4. Once initialization completes, the connector accepts queued thoughts. Use the DSH plugin page to inspect initialization and create or switch processing sessions.
 
 From then on:
 
@@ -191,7 +190,7 @@ Download installers from this project's GitHub Releases. The Windows updater che
 
 The plugin listens on `127.0.0.1:17892` by default. To change the port, set `config.port` on the `todolist-agent-connector` row in the active DSH profile's `cordis.patch.yml`. The plugin writes the active port and a fresh key to `%USERPROFILE%\.dsh\todolist-connector.json` on startup. The Windows app reads that single endpoint and encrypts and authenticates requests and receipts. Keep the file within your own Windows account.
 
-The versioned `/todolist/v1/rpc` endpoint allows session listing, creation, and renaming, text prompt submission, and receipt lookups. `todolist/status` reports the time the message entered the session, turn number, end reason, and tool outcomes. `todolist/wait` listens for turn completion. The Windows app also keeps periodic receipt checks for recovery.
+The versioned `/todolist/v1/rpc` endpoint registers the task bridge, assigns processing sessions, submits thoughts, and reads receipts. `todolist/status` reports the time the message entered the session, turn number, end reason, and tool outcomes. `todolist/wait` listens for turn completion. The Windows app also keeps periodic receipt checks for recovery.
 
 Choose a model provider, model, and reasoning effort under **Plugins → todolist-agent-dsh-connector** in DSH. The next TodoList prompt applies those settings to the linked session. **Use session settings** follows the session's current model. TodoList for Windows connects only to the plugin endpoint, and Android connects to the paired PC's LAN service.
 
@@ -199,13 +198,13 @@ The same page shows the listening address, versions, event wait limit, and recen
 
 ### The dedicated session
 
-If no dedicated session is remembered, the app calls `session/create`, renames the new session to `TodoList · DSH 联动`, and selects it. The session's working directory follows the currently running DSH session when possible; otherwise it uses the most recently active session.
+The connector owns processing sessions and saves their state in `todolist-backends.json` under the active DSH profile. It fingerprints its bundled `prompt.md` and initializes a new session when those instructions change. A changed bridge address, credential, or working directory also creates a new session.
 
-Existing conversations are never hijacked. A **New dedicated session** action is available in Settings.
+The DSH plugin page can create a new backend or select a previous backend with matching instructions and bridge settings. Initialization failures keep thoughts queued in Windows. Each prepared message keeps its original session across switches and restarts. Upgrade Windows and the connector together to 0.4.16.
 
 ### Sending a thought
 
-The composer sends a normal `session/prompt` request. A hidden marker is appended to the message:
+Windows obtains a persistent message assignment through `todolist/prepare`, then submits the thought through `todolist/prompt`. A hidden marker is appended to the message:
 
 ```html
 <!-- todo-msg:<id> -->
@@ -310,7 +309,7 @@ For Android development, open `android/` in Android Studio with JDK 17, Gradle 8
 ```text
 app.go        application state, task operations, snapshots
 store.go      persistence and migration
-dsh.go        DSH discovery, dedicated session, prompt delivery
+dsh.go        connector connection, prompt delivery and receipts
 bridge.go     local loopback API used by DSH
 window_windows.go   WebView2 bindings and window lifecycle
 win32_windows.go    Windows integration for title bar, icon, and tray

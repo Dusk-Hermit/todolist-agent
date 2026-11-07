@@ -1,11 +1,12 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { mkdir, rename, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import z from '@deepseek-ai/schemastery';
 import { queuedInAgent, receiptFromEvents } from './receipt.js';
 import { registerManagement } from './management.js';
+import { Backends } from './backends.js';
 
 export const name = 'todolist-agent-connector';
 export const Config = z.object({
@@ -14,6 +15,7 @@ export const Config = z.object({
   provider: z.string().default('').volatile(),
   model: z.string().default('').volatile(),
   reasoningEffort: z.string().default('').volatile(),
+  workspace: z.string().default('').volatile(),
 });
 
 const route = '/todolist/v1/rpc';
@@ -38,7 +40,8 @@ function encrypt(key, requestNonce, value) {
 }
 
 function validID(value) {
-  return typeof value === 'string' && /^[\w.-]{1,160}$/.test(value);
+  return typeof value === 'string' && /^[\w.-]{1,160}$/.test(value) &&
+    !['__proto__', 'prototype', 'constructor'].includes(value);
 }
 
 async function status(ctx, args, signal) {
@@ -82,48 +85,50 @@ async function waitForStatus(ctx, args, signal) {
   }
 }
 
-async function dispatch(ctx, config, method, args, signal) {
-  const controller = ctx.sessionController;
+async function applyModel(ctx, config, sessionId, signal) {
+  const provider = config.provider.get();
+  const model = config.model.get();
+  const effort = config.reasoningEffort.get() || undefined;
+  if (!provider || !model) return;
+  const { agent, error } = await ctx.sessionController.resolveAgent(sessionId);
+  if (error) throw error;
+  const current = agent.model.current();
+  if (current?.provider === provider && current.model === model && current.reasoningEffort === effort) return;
+  const selection = { provider, model, ...(effort ? { reasoningEffort: effort } : {}) };
+  try {
+    await ctx.llm.resolveCallConfig(selection);
+  } catch (error) {
+    throw Object.assign(new Error(error.message), { code: 'connector/model-unavailable' });
+  }
+  signal.throwIfAborted();
+  agent.model.select(selection);
+}
+
+async function dispatch(ctx, config, backends, method, args, signal) {
   switch (method) {
-    case 'session/list':
-      return controller.list({}, signal);
-    case 'session/create':
-      if (args?.cwd !== undefined && typeof args.cwd !== 'string') break;
-      return controller.create({ cwd: args?.cwd });
-    case 'session/rename':
-      if (!validID(args?.sessionId) || typeof args.title !== 'string') break;
-      return controller.rename({ sessionId: args.sessionId, title: args.title });
-    case 'session/prompt':
-      if (!validID(args?.sessionId) || !validID(args.requestId) || args.mode !== 'queue' ||
+    case 'todolist/backend': {
+      if (!validID(args?.clientID) || typeof args.token !== 'string' || !/^[a-f0-9]{32,128}$/i.test(args.token) ||
+          (args.workspace !== undefined && typeof args.workspace !== 'string')) break;
+      const bridge = new URL(args.url);
+      if (bridge.protocol !== 'http:' || bridge.hostname !== '127.0.0.1' || !bridge.port ||
+          bridge.username || bridge.password || bridge.pathname !== '/' || bridge.search || bridge.hash) break;
+      return backends.register({ ...args, workspace: config.workspace.get() }, signal);
+    }
+    case 'todolist/prepare':
+      if (!validID(args?.clientID) || !validID(args.requestId)) break;
+      return backends.prepare(args.clientID, args.requestId, signal);
+    case 'todolist/prompt': {
+      if (!validID(args?.clientID) || !validID(args.requestId) || args.mode !== 'queue' ||
           !Array.isArray(args.content) || args.content.length !== 1 ||
           args.content[0]?.type !== 'text' || typeof args.content[0].text !== 'string') break;
-      {
-        const provider = config.provider.get();
-        const model = config.model.get();
-        const reasoningEffort = config.reasoningEffort.get();
-        if (provider && model) {
-          const { agent, error } = await controller.resolveAgent(args.sessionId);
-          if (error) throw error;
-          const current = agent.model.current();
-          const effort = reasoningEffort || undefined;
-          if (current?.provider !== provider || current.model !== model || current.reasoningEffort !== effort) {
-            const selection = { provider, model, ...(effort ? { reasoningEffort: effort } : {}) };
-            try {
-              await ctx.llm.resolveCallConfig(selection);
-            } catch (error) {
-              throw Object.assign(new Error(error.message), { code: 'connector/model-unavailable' });
-            }
-            signal.throwIfAborted();
-            // Use the linked Session model without changing the global DSH default.
-            agent.model.select(selection);
-          }
-        }
-      }
-      return controller.prompt({
-        sessionId: args.sessionId, requestId: args.requestId, mode: 'queue',
-        content: [{ type: 'text', text: args.content[0].text }],
+      const sessionId = await backends.assigned(args.clientID, args.requestId);
+      await applyModel(ctx, config, sessionId, signal);
+      return ctx.sessionController.prompt({
+        sessionId, requestId: args.requestId, mode: 'queue',
+        content: [{ type: 'text', text: args.content[0].text + '\n\n<!-- todo-msg:' + args.requestId + ' -->' }],
         clientTimeZone: typeof args.clientTimeZone === 'string' ? args.clientTimeZone : undefined,
       }, signal);
+    }
     case 'todolist/status':
     case 'todolist/wait':
       if (!validID(args?.sessionId) || !validID(args.requestId)) break;
@@ -140,6 +145,7 @@ export function apply(ctx, config = {}) {
   const logger = ctx.logger('todolist-agent-connector');
   const diagnostics = [];
   let sessionContext;
+  let backends;
   let listening = false;
   function record(level, code) {
     const now = Date.now();
@@ -148,10 +154,16 @@ export function apply(ctx, config = {}) {
     diagnostics.push({ at: now, level, code });
     if (diagnostics.length > 24) diagnostics.shift();
   }
-  ctx.inject(['webServer', 'profileContext'], child => registerManagement(child, () => ({
-    host, port, route, watchTimeout, maxRequest, listening, sessionAPI: !!sessionContext,
-    diagnostics,
-  }), record));
+  ctx.inject(['webServer', 'profileContext'], async child => {
+    const template = await readFile(new URL('./prompt.md', import.meta.url), 'utf8');
+    backends = new Backends(join(child.profileContext.dir, 'todolist-backends.json'), template,
+      () => sessionContext, (ctx, sessionId, signal) => applyModel(ctx, config, sessionId, signal));
+    await backends.serial(() => {});
+    registerManagement(child, () => ({
+      host, port, route, watchTimeout, maxRequest, listening, sessionAPI: !!sessionContext,
+      diagnostics, backends: backends.view(),
+    }), record, backends);
+  });
   ctx.inject(['agents', 'llm', 'sessionController', 'sessionQuery'], child => {
     const required = ['list', 'create', 'rename', 'prompt', 'resolveAgent'];
     if (required.some(method => typeof child.sessionController[method] !== 'function') ||
@@ -202,11 +214,11 @@ export function apply(ctx, config = {}) {
     res.once('close', () => abort.abort());
     let result;
     try {
-      if (!sessionContext) throw Object.assign(new Error('DSH session services are unavailable'), { code: 'connector/session-api-unavailable' });
-      const value = await dispatch(sessionContext, config, request.method, request.args?.request ?? request.args?._request, abort.signal);
+      if (!sessionContext || !backends) throw Object.assign(new Error('DSH backend services are unavailable'), { code: 'connector/session-api-unavailable' });
+      const value = await dispatch(sessionContext, config, backends, request.method, request.args?.request ?? request.args?._request, abort.signal);
       result = { ok: true, value };
     } catch (error) {
-      if (!abort.signal.aborted) {
+      if (!abort.signal.aborted && error?.code !== 'connector/backend-not-ready') {
         const code = typeof error?.code === 'string' && /^[\w./-]{1,80}$/.test(error.code) ? error.code : 'CONNECTOR_RPC_ERROR';
         record('error', code);
       }

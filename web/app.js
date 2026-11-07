@@ -197,7 +197,6 @@
     updatePinButton();
     updateFilterButtons();
     renderAll();
-    updateSetupBanner();
     if (S.settingsOpen) updateSettings(false);
     const totalChanged = s.messageTotal !== S.lastMessageTotal;
     S.lastMessageTotal = s.messageTotal;
@@ -226,7 +225,6 @@
     renderSessionChip();
     renderRunning();
     renderSendState();
-    updateSetupBanner();
     if (S.settingsOpen) updateSettings(false);
     if (!wasRunning && st.running && !(S.drag && S.drag.ghost)) {
       // Scroll the list to the top so the running task is visible.
@@ -1009,27 +1007,6 @@
 
   // ---------------------------------------------------------------- setup
 
-  function updateSetupBanner() {
-    const el = $("setupBanner");
-    if (!el) return;
-    const d = (S.data && S.data.dsh) || {};
-    const sid = d.sessionId || "";
-    const onboarded = !!(S.data && S.data.prefs && S.data.prefs.onboardedSessions && S.data.prefs.onboardedSessions[sid]);
-    const show = !!(!isMobile() && d.connected && sid && !onboarded && !S.dismissed);
-    el.classList.toggle("hidden", !show);
-  }
-
-  async function onboard() {
-    try {
-      await call("todo_sendOnboarding");
-      S.dismissed = true;
-      updateSetupBanner();
-      showToast("success", "已发送接入说明，DSH 会开始维护清单");
-    } catch (e) {
-      showToast("error", errText(e));
-    }
-  }
-
   // ---------------------------------------------------------------- task modal
 
   function openTaskModal(id, parentId) {
@@ -1244,10 +1221,9 @@
     }
     $("connHint").textContent = d.error
       ? d.error
-      : "通过本机 TodoList 连接插件访问 DSH。模型和推理强度在 DSH 的插件页设置。";
+      : "通过本机 DSH 插件处理消息，会话、初始化提示词和模型均在 DSH 插件页管理。";
 
     if (fillInputs) {
-      $("writeAgents").checked = S.data.prefs.writeAgents !== false;
       $("alwaysOnTop").checked = !!S.data.prefs.alwaysOnTop;
       $("compactPref").checked = S.viewMode === "compact";
     }
@@ -1273,93 +1249,16 @@
   }
 
   function renderSessionSelect() {
-    const sel = $("sessionSelect");
-    if (!sel) return;
-    if (sel === document.activeElement) return;
-    const sessions = (S.data && S.data.sessions) || [];
-    const current = currentSession();
-    const prev = sel.value;
-    sel.innerHTML = "";
-    if (!sessions.length) {
-      const o = document.createElement("option");
-      o.value = current || "";
-      o.textContent = current
-        ? ((S.data.dsh && S.data.dsh.sessionTitle) || "当前会话") + " · 当前"
-        : "（未发现会话）";
-      sel.appendChild(o);
-      return;
-    }
-    for (const s of sessions) {
-      const o = document.createElement("option");
-      o.value = s.id;
-      const title = s.title || (s.blank ? "新会话" : "未命名会话");
-      const bits = [title];
-      if (s.cwd) bits.push(cwdShort(s.cwd));
-      if (s.updatedAt) bits.push(relTime(s.updatedAt));
-      if (s.running) bits.unshift("●");
-      o.textContent = bits.join(" · ");
-      if (s.id === current) o.selected = true;
-      sel.appendChild(o);
-    }
-    if (current && !sessions.some((s) => s.id === current)) {
-      const o = document.createElement("option");
-      o.value = current;
-      o.textContent = ((S.data.dsh && S.data.dsh.sessionTitle) || "当前会话") + " · 当前";
-      o.selected = true;
-      sel.appendChild(o);
-    }
-    if (prev && sessions.some((s) => s.id === prev)) sel.value = prev;
-    if (current && sessions.some((s) => s.id === current)) sel.value = current;
+    const el = $("backendSession");
+    if (!el) return;
+    const dsh = (S.data && S.data.dsh) || {};
+    el.textContent = dsh.sessionId ? "插件处理会话 · " + dsh.sessionId : "等待插件分配并初始化处理会话";
   }
 
   async function connectDSH() {
-    const session = $("sessionSelect").value;
     try {
-      await call("todo_connectDSH", session);
+      await call("todo_connectDSH");
       showToast("info", "正在重新连接 DSH…");
-    } catch (e) {
-      showToast("error", errText(e));
-    }
-  }
-
-  async function refreshSessions() {
-    try {
-      const items = await call("todo_refreshSessions");
-      if (Array.isArray(items)) {
-        S.data.sessions = items;
-        renderSessionSelect();
-      }
-      showToast("info", "已请求刷新会话列表");
-    } catch (e) {
-      showToast("error", errText(e));
-    }
-  }
-
-  async function selectSession(id) {
-    if (!id || id === currentSession()) return;
-    try {
-      await call("todo_selectSession", id);
-      showToast("success", "已切换目标会话");
-    } catch (e) {
-      showToast("error", errText(e));
-    }
-  }
-
-  async function onboardFromSettings() {
-    try {
-      await call("todo_sendOnboarding");
-      showToast("success", "接入说明已发送到 DSH");
-      closeSettings();
-    } catch (e) {
-      showToast("error", errText(e));
-    }
-  }
-
-  async function writeAgents() {
-    try {
-      const r = await call("todo_writeAgents");
-      if (r && r.ok) showToast("success", "已写入 " + r.path);
-      else showToast("error", (r && r.error) || "写入失败");
     } catch (e) {
       showToast("error", errText(e));
     }
@@ -1668,29 +1567,7 @@
       }
     });
 
-    $("setupBtn").addEventListener("click", onboard);
-    $("setupDismiss").addEventListener("click", () => {
-      S.dismissed = true;
-      updateSetupBanner();
-    });
-
     $("connectBtn").addEventListener("click", connectDSH);
-    $("newSessionBtn").addEventListener("click", async () => {
-      try {
-        await call("todo_newSession");
-        showToast("info", "正在创建专用会话…");
-      } catch (e) {
-        showToast("error", errText(e));
-      }
-    });
-    $("refreshSessions").addEventListener("click", refreshSessions);
-    $("sessionSelect").addEventListener("change", (e) => selectSession(e.target.value));
-    $("onboardBtn").addEventListener("click", onboardFromSettings);
-    $("writeAgents").addEventListener("change", (e) => {
-      if (S.data) S.data.prefs.writeAgents = e.target.checked;
-      savePrefs();
-      if (e.target.checked) writeAgents();
-    });
     $("alwaysOnTop").addEventListener("change", async (e) => {
       try {
         await call("todo_setAlwaysOnTop", e.target.checked);

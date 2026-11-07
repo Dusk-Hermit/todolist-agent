@@ -16,6 +16,11 @@ window.__ModuleLoader__.load({
         check: '检查更新', upgrade: '在线更新', current: '已是最新版本', restart: '已安装，重启 DSH 后生效',
         available: '可更新到', logs: '运行日志', empty: '暂无记录', suggestion: '建议检查插件更新',
         managementUnavailable: '更新和诊断接口暂不可用，请重新打开 DSH 页面。',
+        backend: '处理会话', newBackend: '新建并初始化处理会话', selectBackend: '使用此会话',
+        initializing: '正在初始化', failed: '初始化失败，请新建会话重试', backendReady: '已就绪',
+        backendHint: '已发送的消息继续在原会话核对。后续消息使用这里选择的处理会话。提示词变化后插件自动创建新会话。',
+        promptVersion: '初始化提示词指纹',
+        workspace: '处理会话工作目录（可选）',
       },
       en: {
         provider: 'Model provider', model: 'Model', effort: 'Reasoning effort', inherited: 'Use session settings',
@@ -27,14 +32,20 @@ window.__ModuleLoader__.load({
         check: 'Check for updates', upgrade: 'Update online', current: 'Up to date', restart: 'Installed. Restart DSH to apply.',
         available: 'Update available', logs: 'Runtime log', empty: 'No entries', suggestion: 'Check for connector updates',
         managementUnavailable: 'Update and diagnostics are unavailable. Reopen the DSH page.',
+        backend: 'Processing session', newBackend: 'Create and initialize a new session', selectBackend: 'Use this session',
+        initializing: 'Initializing', failed: 'Initialization failed. Create a new session to retry.', backendReady: 'Ready',
+        backendHint: 'Sent messages keep their original session. Later messages use the selected backend. A changed prompt creates a new session.',
+        promptVersion: 'Initialization prompt fingerprint',
+        workspace: 'Backend working directory (optional)',
       },
     };
 
-    async function manage(action = '') {
+    async function manage(action = '', body) {
       const config = window.__TodoListConnectorManagement;
       if (!config) throw new Error('Connector management unavailable');
       const response = await fetch(config.endpoint + (action ? '/' + action : ''), {
         method: action ? 'POST' : 'GET', headers: { Authorization: 'Bearer ' + config.token },
+        ...(body ? { body: JSON.stringify(body) } : {}),
       });
       if (response.status === 401) throw new Error('Connector management token expired');
       const result = await response.json();
@@ -73,6 +84,18 @@ window.__ModuleLoader__.load({
           setBusy(false);
         }
       }
+      async function changeBackend(clientID, sessionId) {
+        setBusy(true);
+        setNotice('');
+        try {
+          await manage('backend', { clientID, ...(sessionId ? { sessionId } : {}) });
+          setInfo(await manage());
+        } catch (error) {
+          setNotice(error.message);
+        } finally {
+          setBusy(false);
+        }
+      }
       const entries = info ? [
         [t('port'), info.host + ':' + info.port],
         [t('rpc'), info.route],
@@ -90,6 +113,18 @@ window.__ModuleLoader__.load({
           h(Button, { disabled: busy || !info, onClick: () => update(false) }, t('check')),
           h(Button, { variant: 'primary', disabled: busy || !info, onClick: () => update(true) }, t('upgrade'))),
         h('p', { role: 'status' }, notice || (info?.staged ? t('restart') : '')),
+        info?.backends && h('section', null,
+          h('h3', null, t('backend')),
+          h('p', null, t('backendHint')),
+          h('p', null, t('promptVersion') + ' ' + info.backends.promptHash.slice(0, 12)),
+          info.backends.clients.map(client => h('div', { key: client.id, style: { marginBlock: 12 } },
+            h('p', null, client.id),
+            client.backends.map(backend => h('div', { key: backend.sessionId, style: { marginBlock: 8 } },
+              h('span', null, (backend.sessionId === client.active ? '● ' : '') + backend.sessionId + ' · ' +
+                (backend.phase === 'ready' ? t('backendReady') : backend.phase === 'failed' ? t('failed') : t('initializing'))),
+              backend.compatible && backend.sessionId !== client.active &&
+                h(Button, { disabled: busy, onClick: () => changeBackend(client.id, backend.sessionId) }, t('selectBackend')))),
+            h(Button, { disabled: busy, onClick: () => changeBackend(client.id) }, t('newBackend'))))),
         info && (!info.listening || !info.sessionAPI || (info.runtime && info.runtime !== info.testedDSH) ||
           info.diagnostics.some(entry => entry.level === 'error')) && h('p', null, t('suggestion')),
         info && h('details', { open: true }, h('summary', null, t('logs')),
@@ -110,8 +145,8 @@ window.__ModuleLoader__.load({
           const entry = settings.value.namespaces.find(item => item.ns === namespace);
           if (!mounted) return;
           if (!entry) { setNotice(t('unavailable')); return; }
-          const { provider = '', model = '', reasoningEffort = '' } = entry.value;
-          setForm({ provider, model, reasoningEffort, revision: entry.revision,
+          const { provider = '', model = '', reasoningEffort = '', workspace = '' } = entry.value;
+          setForm({ provider, model, reasoningEffort, workspace, revision: entry.revision,
             groups: catalog.value.groups, writable: settings.value.writable });
         }).catch(error => { if (mounted) setNotice(error.message); });
         return () => { mounted = false; };
@@ -135,9 +170,9 @@ window.__ModuleLoader__.load({
         event.preventDefault();
         setSaving(true);
         setNotice('');
-        const { provider, model, reasoningEffort, revision } = form;
+        const { provider, model, reasoningEffort, workspace, revision } = form;
         try {
-          const result = await remote.settings.update(namespace, { provider, model, reasoningEffort }, revision);
+          const result = await remote.settings.update(namespace, { provider, model, reasoningEffort, workspace }, revision);
           if (!result.ok) throw new Error(result.error.message);
           setForm({ ...form, revision: result.value.revision });
           setNotice(t('saved'));
@@ -149,6 +184,9 @@ window.__ModuleLoader__.load({
       }
       return h('form', { onSubmit: save, style: { display: 'grid', gap: 12, maxWidth: 480 } },
         h('p', null, t('scope')),
+        h('label', { style: { display: 'grid', gap: 6 } }, h('span', null, t('workspace')),
+          h('input', { value: form.workspace, disabled, onChange: event => set({ workspace: event.target.value }),
+            style: { minHeight: 34, color: 'inherit', background: 'transparent', border: '1px solid currentColor', borderRadius: 6 } })),
         select('provider', form.provider, [['', t('inherited')], ...form.groups.map(group => [group.id, group.name])],
           provider => set({ provider, model: '', reasoningEffort: '' })),
         select('model', form.model, [['', '—'], ...models.map(model => [model.id, model.name])],

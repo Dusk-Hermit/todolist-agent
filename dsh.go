@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -123,88 +122,6 @@ func (c *DSHClient) Wake() {
 	}
 }
 
-// SelectSession changes the session the composer targets.
-func (c *DSHClient) SelectSession(id string) {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return
-	}
-	a := c.app
-	a.mu.Lock()
-	a.state.DSH.SessionID = id
-	a.mu.Unlock()
-	a.markDirty()
-	st := a.getStatus()
-	st.SessionID = id
-	st.SessionTitle = ""
-	st.CWD = ""
-	st.Running = false
-	st.RunningSince = 0
-	st.Armed = false
-	st.UpdatedAt = 0
-	st.LastPrompt = ""
-	st.LastResponse = ""
-	st.Turns = 0
-	st.Steps = 0
-	st.Tokens = 0
-	st.Error = ""
-	a.setStatus(st)
-	a.emitStatus()
-	a.emitState()
-	c.Wake()
-}
-
-// NewDedicatedSession creates a fresh DSH conversation for the desktop app.
-func (c *DSHClient) NewDedicatedSession() {
-	go func() {
-		conn := c.endpoint()
-		if conn.base == "" {
-			c.app.toast("error", "还没有连接到 DSH")
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
-		defer cancel()
-		items, err := c.listAt(ctx, conn, 10*time.Second)
-		if err != nil {
-			c.app.toast("error", "无法读取会话列表："+err.Error())
-			return
-		}
-		cwd := pickWorkspace(items)
-		sid, err := c.createDedicated(ctx, conn, cwd)
-		if err != nil {
-			c.app.toast("error", "创建专用会话失败："+err.Error())
-			return
-		}
-		a := c.app
-		a.mu.Lock()
-		a.state.DSH.SessionID = sid
-		a.mu.Unlock()
-		a.markDirty()
-		st := a.getStatus()
-		st.SessionID = sid
-		st.SessionTitle = "TodoList · DSH 联动"
-		st.CWD = cwd
-		st.Connected = true
-		st.Connecting = false
-		st.Error = ""
-		st.Running = false
-		st.RunningSince = 0
-		st.Armed = false
-		st.UpdatedAt = 0
-		st.LastPrompt = ""
-		st.LastResponse = ""
-		st.Turns = 0
-		st.Steps = 0
-		st.Tokens = 0
-		st.CheckedAt = time.Now().UnixMilli()
-		a.setStatus(st)
-		a.emitStatus()
-		a.emitState()
-		a.toast("success", "已创建专用会话：TodoList · DSH 联动")
-		c.Wake()
-	}()
-}
-
 func (c *DSHClient) loop(ctx context.Context) {
 	for {
 		if ctx.Err() != nil {
@@ -317,54 +234,6 @@ func (c *DSHClient) connect(ctx context.Context) error {
 	return nil
 }
 
-func pickWorkspace(items []sessionRow) string {
-	// Prefer the workspace of the conversation the user is actively using.
-	for _, it := range items {
-		if it.Running && strings.TrimSpace(it.CWD) != "" {
-			return it.CWD
-		}
-	}
-	best := ""
-	var bestAt int64
-	for _, it := range items {
-		if strings.TrimSpace(it.CWD) == "" {
-			continue
-		}
-		if it.UpdatedAt >= bestAt {
-			bestAt = it.UpdatedAt
-			best = it.CWD
-		}
-	}
-	return best
-}
-
-// createDedicated creates one ordinary DSH session, names it after this app, and
-// returns its id. It is the zero-configuration path for a user who just opened
-// the desktop app without a stored session.
-func (c *DSHClient) createDedicated(ctx context.Context, conn dshEndpoint, cwd string) (string, error) {
-	request := map[string]any{}
-	if strings.TrimSpace(cwd) != "" {
-		request["cwd"] = cwd
-	}
-	raw, _, err := c.invoke(ctx, conn, "session/create", map[string]any{"request": request}, 25*time.Second)
-	if err != nil {
-		return "", err
-	}
-	var out struct {
-		SessionID string `json:"sessionId"`
-	}
-	if err := json.Unmarshal(raw, &out); err != nil || out.SessionID == "" {
-		return "", fmt.Errorf("session/create 没有返回会话 id")
-	}
-	_, _, _ = c.invoke(ctx, conn, "session/rename", map[string]any{
-		"request": map[string]any{
-			"sessionId": out.SessionID,
-			"title":     "TodoList · DSH 联动",
-		},
-	}, 15*time.Second)
-	return out.SessionID, nil
-}
-
 func (c *DSHClient) activate(ctx context.Context, conn dshEndpoint, items []sessionRow) {
 	c.watchPrompt(ctx, nil)
 	c.mu.Lock()
@@ -374,57 +243,7 @@ func (c *DSHClient) activate(ctx context.Context, conn dshEndpoint, items []sess
 	a := c.app
 	a.mu.Lock()
 	a.state.DSH.BaseURL = conn.base
-	selected := a.state.DSH.SessionID
-	workspace := a.state.DSH.Workspace
-	a.mu.Unlock()
-
-	ids := make(map[string]bool, len(items))
-	for _, it := range items {
-		ids[it.SessionID] = true
-	}
-	if !ids[selected] {
-		selected = ""
-		if env := os.Getenv("DSH_SESSION_ID"); env != "" && ids[env] {
-			selected = env
-		}
-		if selected == "" {
-			// A dedicated session keeps the desktop app's history separate from
-			// whatever conversation the user had open in the DSH GUI.
-			cwd := workspace
-			if cwd == "" {
-				cwd = pickWorkspace(items)
-			}
-			if sid, err := c.createDedicated(ctx, conn, cwd); err == nil {
-				selected = sid
-				if fresh, ferr := c.listAt(ctx, conn, 15*time.Second); ferr == nil {
-					items = fresh
-				}
-			} else {
-				log.Printf("create dedicated session: %v", err)
-			}
-		}
-		if selected == "" && workspace != "" {
-			for _, it := range items {
-				if it.CWD == workspace && !it.Blank {
-					selected = it.SessionID
-					break
-				}
-			}
-		}
-		if selected == "" {
-			for _, it := range items {
-				if !it.Blank {
-					selected = it.SessionID
-					break
-				}
-			}
-		}
-		if selected == "" && len(items) > 0 {
-			selected = items[0].SessionID
-		}
-	}
-
-	a.mu.Lock()
+	selected := items[0].SessionID
 	a.state.DSH.SessionID = selected
 	a.state.QueueReadyAt = max(a.state.QueueReadyAt, time.Now().Add(promptCollectTime).UnixMilli())
 	a.mu.Unlock()
@@ -446,7 +265,6 @@ func (c *DSHClient) activate(ctx context.Context, conn dshEndpoint, items []sess
 	}
 	st.CheckedAt = time.Now().UnixMilli()
 	a.setStatus(st)
-	a.syncAgentsBlock()
 	a.emit("sessions", opts)
 	a.emitStatus()
 	a.emitState()
@@ -510,30 +328,13 @@ func (c *DSHClient) refresh(ctx context.Context) error {
 	a.setSessions(opts)
 	a.emit("sessions", opts)
 
+	row := &items[0]
 	a.mu.Lock()
-	sessionID := a.state.DSH.SessionID
-	a.mu.Unlock()
-
-	row := findSession(items, sessionID)
-	if row == nil && sessionID == "" {
-		selected := ""
-		if len(items) > 0 {
-			for _, it := range items {
-				if !it.Blank {
-					selected = it.SessionID
-					break
-				}
-			}
-			if selected == "" {
-				selected = items[0].SessionID
-			}
-		}
-		a.mu.Lock()
-		a.state.DSH.SessionID = selected
-		a.mu.Unlock()
-		a.markDirty()
-		row = findSession(items, selected)
+	if a.state.DSH.SessionID != row.SessionID {
+		a.state.DSH.SessionID = row.SessionID
+		a.dirty = true
 	}
+	a.mu.Unlock()
 
 	prev := a.getStatus()
 	st := prev
@@ -639,15 +440,25 @@ func (c *DSHClient) endpoint() dshEndpoint {
 func (c *DSHClient) listAt(ctx context.Context, conn dshEndpoint, timeout time.Duration) ([]sessionRow, error) {
 	c.reqMu.Lock()
 	defer c.reqMu.Unlock()
-	raw, _, err := c.invoke(ctx, conn, "session/list", map[string]any{"_request": map[string]any{}}, timeout)
+	raw, _, err := c.invoke(ctx, conn, "todolist/backend", c.backendArgs(), timeout)
 	if err != nil {
 		return nil, err
 	}
 	var out struct {
-		Items []sessionRow `json:"items"`
+		Items   []sessionRow `json:"items"`
+		Backend struct {
+			Phase  string `json:"phase"`
+			Reason string `json:"reason"`
+		} `json:"backend"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, fmt.Errorf("解析会话列表失败: %w", err)
+	}
+	if len(out.Items) != 1 || out.Items[0].SessionID == "" {
+		return nil, fmt.Errorf("DSH 插件没有返回处理会话，请升级插件")
+	}
+	if out.Backend.Phase == "failed" {
+		return nil, fmt.Errorf("DSH 后端初始化失败（%s），请在 DSH 插件页新建处理会话", out.Backend.Reason)
 	}
 	return out.Items, nil
 }
@@ -680,166 +491,34 @@ func decodeDSHResult(data []byte, status int) (json.RawMessage, int, error) {
 	return env.Result.Value, status, nil
 }
 
-func (c *DSHClient) SendPrompt(text string, onboarding bool) (string, error) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return "", fmt.Errorf("消息不能为空")
-	}
-	st := c.app.getStatus()
-	if !st.Connected || st.SessionID == "" {
-		return "", fmt.Errorf("DSH 尚未连接，请先在设置中连接会话")
-	}
-	now := time.Now().UnixMilli()
-	kind := "input"
-	if onboarding {
-		kind = "onboarding"
-	}
-	msg := ChatMessage{
-		ID:        uuid.NewString(),
-		Text:      text,
-		Status:    "sending",
-		Kind:      kind,
-		SessionID: st.SessionID,
-		At:        now,
-	}
-	c.app.appendMessage(msg)
-	c.app.emitState()
-
-	st.Sending = true
-	c.app.setStatus(st)
-	c.app.emitStatus()
-
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-		defer cancel()
-		contentText := text
-		if !onboarding {
-			// Markdown hides HTML comments, while the model still receives the
-			// durable message id. The bridge can then record exact provenance.
-			contentText = todoPromptText(text, msg.ID)
-		}
-		args := map[string]any{
-			"request": map[string]any{
-				"requestId": uuid.NewString(),
-				"sessionId": msg.SessionID,
-				"mode":      "queue",
-				"content": []map[string]any{
-					{"type": "text", "text": contentText},
-				},
-				"clientTimeZone": clientTimeZone(),
-			},
-		}
-		raw, err := c.call(ctx, "session/prompt", args)
-		cur := c.app.getStatus()
-		cur.Sending = false
-		if err != nil {
-			msg.Status = "failed"
-			msg.Error = err.Error()
-			c.app.updateMessage(msg)
-			c.app.setStatus(cur)
-			c.app.emitStatus()
-			c.app.toast("error", "发送失败："+err.Error())
-			return
-		}
-		var out struct {
-			Accepted bool `json:"accepted"`
-		}
-		_ = json.Unmarshal(raw, &out)
-		if !out.Accepted {
-			msg.Status = "failed"
-			msg.Error = "DSH 未接受消息"
-			c.app.updateMessage(msg)
-			c.app.setStatus(cur)
-			c.app.emitStatus()
-			c.app.toast("error", "DSH 未接受消息")
-			return
-		}
-		msg.Status = "sent"
-		c.app.updateMessage(msg)
-		cur.LastPrompt = truncateRunes(text, 220)
-		cur.Connected = true
-		c.app.setStatus(cur)
-		if onboarding {
-			c.app.recordEvent(HistoryEvent{
-				ID: uuid.NewString(), Kind: "onboarding", Actor: "user",
-				Title: "启用清单同步", Detail: "已发送 TodoList 长期清单接入说明", At: time.Now().UnixMilli(),
-			})
-		} else {
-			c.app.recordEvent(HistoryEvent{
-				ID: uuid.NewString(), Kind: "input", Actor: "user",
-				Title: "发送到 DSH", Detail: truncateRunes(text, 300), At: time.Now().UnixMilli(),
-				SourceMessageID: msg.ID, OriginalText: truncateRunes(text, 500),
-			})
-		}
-		c.app.emitState()
-		if onboarding {
-			c.app.markOnboarded(msg.SessionID)
-			if c.app.shouldWriteAgents() {
-				if path, werr := c.app.writeAgentsBlock(); werr == nil {
-					c.app.toast("success", "已启用 DSH 任务同步，并写入 "+filepath.Base(path))
-				}
-			}
-			c.app.emitState()
-		}
-		time.Sleep(350 * time.Millisecond)
-		c.Wake()
-	}()
-	return msg.ID, nil
-}
-
-func (c *DSHClient) OnboardingText() string {
-	url := "http://127.0.0.1:17890"
-	token := ""
-	if c.app.bridge != nil {
-		url = c.app.bridge.URL()
-		token = c.app.bridge.Token()
-	}
-	return strings.Join([]string{
-		"【TodoList 长期清单 · 接入说明】",
-		"我是通过桌面 TodoList 应用连接你的。我的输入会持续、零散、杂乱，可能包含感慨、吐槽、微信式自言自语、转述和链接；并不都是任务。请把本会话当作我的长期任务收件箱和想法回顾库。",
-		"",
-		"本地接口：",
-		"- 地址：" + url,
-		"- 鉴权：请求头 `Authorization: Bearer " + token + "`",
-		"- `GET /api/todos`：查看全部任务，用于查重和定位",
-		"- `GET /api/journal?limit=20&q=关键词`：回看很久以前的想法原文及关联任务",
-		"- `POST /api/todos`：",
-		"  - `{\"action\":\"add\",\"title\":\"...\",\"notes\":\"...\",\"priority\":\"pinned|high|normal|low\",\"parentId\":\"...\",\"sourceMessageId\":\"...\"}`",
-		"  - `{\"action\":\"update\",\"id\":\"...\",\"title\":\"...\",\"notes\":\"...\",\"status\":\"todo|doing|done\"}`",
-		"  - `{\"action\":\"complete\",\"id\":\"...\"}` / `reopen` / `delete`",
-		"",
-		"每条来自 TodoList 的消息末尾会有一个隐藏标记 `<!-- todo-msg:<id> -->`。请把它作为 `sourceMessageId`；没有标记就省略。这样我能回看每个任务是从哪条想法来的。",
-		"",
-		"请遵循：",
-		"1. 先 GET 列表，避免重复；相似的旧任务优先 update，不要重复 add。",
-		"2. 只把明确的行动意图（想做、要做、记一下、提醒我、推进某事）提炼成任务；纯情绪、感慨、分享不要自动建任务。可以简短回应，或问一句“要不要记成任务”。",
-		"3. 一条消息有多个行动点就拆成多个任务；一个行动点不要拆碎。",
-		"- " + todoPlacementRule,
-		"4. 任务支持一层子任务：`add` 时传 `parentId`；子任务不能再有子任务。只有当一个任务确实有 2-5 个明确步骤时才拆子任务，不要为了层级而层级。",
-		"5. 长期跟踪、需要一直排在最前面但不紧急的任务用 `priority:\"pinned\"`（置顶 · 长期）；它排在 high 之前，但视觉上不抢高优先级。",
-		"6. `GET /api/todos` 返回的每个任务有 `number` 字段（如 `2.4`），它就是打钩圆圈右侧的序号；用户用序号指代时按 `number` 精确找到 id，不要按数组下标猜。序号会随排序、优先级和状态变化，操作前重新 GET。",
-		"7. 用户确认完成任务时用 `complete`。用户明确要求移出清单时用 `delete`。仅表示暂缓或犹豫时保留任务。",
-		"8. 开始处理某任务 → `doing`；完成后 → `done`。",
-		"9. 如果想法里提到明确的时间/期限（今晚、明天、周五、周末、下周、某月某日等），把这个时间写进任务标题，不要只写在 notes；用尽量短的写法，例如「周五前交开题报告」「周末去看展」。过于模糊的「以后/有空」不要硬塞时间。",
-		"10. 修改标题时，新标题必须仍然能让人只看标题就知道要做什么。要保留旧标题里的核心动作、对象和关键限定，再融入修改意见，不能只写修改意见而丢掉原任务信息。例如旧标题「整理分享用的演示截图」，用户说「改成从录屏里挑」→「从录屏里挑分享用演示截图」，不能只写「从录屏里挑」。改完先自检：只看新标题能否知道要做什么？不能就补回旧核心信息。",
-		"11. 任务标题写成可执行的短句；`notes` 使用固定结构，不要把所有内容混在一起。",
-		"12. `notes` 必须分成两段：第一段是「这个事项的详细描述」，信息量要充足（目标、背景、做法、范围、判断标准等），不要只写一句；中间单独一行 `-------`；最后是「原话区」，只放我的原话，最新的在最上面、旧的依次往下。格式：`{{详细描述}}\\n\\n-------\\n\\n- {{最新原话}}\\n- {{较早原话}}`。",
-		"13. 每次 update 都要重写详细描述，使其与当前任务一致；原话只追加、不改写、不删除，新原话放在原话区最上面，旧原话依次往后。所有原话必须集中在 `-------` 下方，不能混入详细描述；备注总长控制在 2000 字内，原话很多时保留最相关的。",
-		"14. 回复只简要汇报实际新增/完成/删除了哪些任务，不要只列计划。",
-		"",
-		"如果我的消息没有明确行动点，就不要制造任务；拿不准时最多问一个简短问题。",
-	}, "\n")
-}
-
-func (a *App) shouldWriteAgents() bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.state.Prefs.WriteAgents
-}
-
 func clientTimeZone() string {
 	if tz := strings.TrimSpace(os.Getenv("DSH_CLIENT_TIMEZONE")); tz != "" {
 		return tz
 	}
 	return "Asia/Shanghai"
+}
+
+func (c *DSHClient) backendArgs() map[string]any {
+	request := map[string]any{"clientID": c.app.replicaSnapshot().Device}
+	if c.app.bridge != nil {
+		request["url"] = c.app.bridge.URL()
+		request["token"] = c.app.bridge.Token()
+	}
+	return map[string]any{"request": request}
+}
+
+func (c *DSHClient) preparePrompt(ctx context.Context, id string) (string, error) {
+	raw, err := c.call(ctx, "todolist/prepare", map[string]any{"request": map[string]string{
+		"clientID": c.app.replicaSnapshot().Device, "requestId": id,
+	}})
+	if err != nil {
+		return "", err
+	}
+	var reply struct {
+		SessionID string `json:"sessionId"`
+	}
+	if json.Unmarshal(raw, &reply) != nil || reply.SessionID == "" {
+		return "", fmt.Errorf("DSH 插件未分配处理会话")
+	}
+	return reply.SessionID, nil
 }
