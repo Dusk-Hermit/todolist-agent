@@ -115,7 +115,7 @@ TodoList Agent 把这一步搬到了桌面上：
 在每台负责处理消息的 Windows 电脑上，从同一 Release 下载 `todolist-agent-dsh-connector-<版本>.tgz`，用 DSH 自带的命令安装到正在使用的配置。以桌面版为例，在 PowerShell 运行以下命令。
 
 ```powershell
-dsh plugin --profile desktop add "C:\实际下载目录\todolist-agent-dsh-connector-0.4.16.tgz"
+dsh plugin --profile desktop add "C:\实际下载目录\todolist-agent-dsh-connector-0.4.17.tgz"
 ```
 
 使用 DSH Web 版时将 `desktop` 改为 `web`，自定义配置则填入自己的配置名。如果 `dsh` 不在 PATH，可以用 PowerShell 的 `&` 调用 DSH 安装目录下的 `resources\runtime\cli\bin\dsh.cmd`。安装后重启该 DSH 配置，再打开 TodoList Agent，或在设置里点「重新连接」。Android 通过配对电脑获取执行结果。
@@ -202,7 +202,7 @@ Windows 和 Android 启动时自动检查 GitHub Release，也可以在「设置
 
 处理会话由 DSH 插件保存于当前 DSH 配置的 `todolist-backends.json`。初始化规则位于插件包的 `prompt.md`，插件按内容指纹识别变更。升级只有规则内容发生变化时才创建并初始化新会话。桥接地址、鉴权或工作目录变化也会启用新会话。
 
-在 DSH 插件页可「新建并初始化处理会话」，也可选用规则与接口配置相符的历史处理会话。初始化失败会显示错误，日常消息留在 Windows 待发队列。已分配消息的原会话归属会持久保存，切换和重启后仍按原会话核对执行结果。Windows 与插件应一同升级到 0.4.16。
+在 DSH 插件页可「新建并初始化处理会话」，也可选用规则与接口配置相符的历史处理会话。初始化失败会显示错误，日常消息留在 Windows 待发队列。已分配消息的原会话归属会持久保存，切换和重启后仍按原会话核对执行结果。Windows 与插件应一同升级到 0.4.17。
 
 ### 发送一条想法
 

@@ -228,6 +228,13 @@ func (c *DSHClient) connect(ctx context.Context) error {
 	}
 	items, err := c.listAt(ctx, conn, 8*time.Second)
 	if err != nil {
+		// Backend initialization can fail while the connector still serves
+		// receipts for work already assigned to an earlier Session.
+		c.mu.Lock()
+		c.conn = conn
+		c.mu.Unlock()
+		c.watchPrompt(ctx, nil)
+		c.pumpQueue(ctx, nil, nil)
 		return fmt.Errorf("无法连接 DSH 插件，请确认已启动安装插件的 DSH：%w", err)
 	}
 	c.activate(ctx, conn, items)
