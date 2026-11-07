@@ -113,7 +113,7 @@ Download and run `TodoListAgent-Setup-win64.exe` from [GitHub Releases](https://
 On each Windows computer that handles prompts, download `todolist-agent-dsh-connector-<version>.tgz` from the same release and install it into the DSH profile you use. For DSH Desktop, run this in PowerShell.
 
 ```powershell
-dsh plugin --profile desktop add "C:\path\to\todolist-agent-dsh-connector-0.4.17.tgz"
+dsh plugin --profile desktop add "C:\path\to\todolist-agent-dsh-connector-0.4.18.tgz"
 ```
 
 Use `web` for the DSH Web profile or specify your custom profile name. If `dsh` is outside PATH, use PowerShell's `&` to run `resources\runtime\cli\bin\dsh.cmd` inside the DSH installation folder. Restart the selected DSH profile and reopen TodoList Agent or click **重新连接** in its settings. Android receives execution results from the paired computer.
@@ -196,11 +196,13 @@ Choose a model provider, model, and reasoning effort under **Plugins → todolis
 
 The same page shows the listening address, versions, event wait limit, and recent runtime diagnostics. **Check for updates** reads the direct GitHub Release manifest first. **Update online** verifies the package size and SHA-256, then installs a newer stable release into the active DSH profile. Restart DSH to activate it.
 
+Cordis resource disposers close the connector listener on unload. If an older instance still occupies the configured port during an upgrade, the new instance binds an OS-assigned loopback port and publishes that actual port in discovery. Windows reads it automatically, and the plugin page shows the actual address and the port warning.
+
 ### The dedicated session
 
 The connector owns processing sessions and saves their state in `todolist-backends.json` under the active DSH profile. It fingerprints its bundled `prompt.md` and initializes a new session when those instructions change. A changed bridge address, credential, or working directory also creates a new session.
 
-The DSH plugin page can create a new backend or select a previous backend with matching instructions and bridge settings. Initialization failures keep thoughts queued in Windows. Each prepared message keeps its original session across switches and restarts. Upgrade Windows and the connector together to 0.4.17.
+The DSH plugin page can create a new backend or select a previous backend with matching instructions and bridge settings. Initialization failures keep thoughts queued in Windows. Each prepared message keeps its original session across switches and restarts. Upgrade Windows and the connector together to 0.4.18.
 
 ### Sending a thought
 

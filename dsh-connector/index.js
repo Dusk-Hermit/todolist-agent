@@ -147,6 +147,7 @@ export function apply(ctx, config = {}) {
   let sessionContext;
   let backends;
   let listening = false;
+  let actualPort = port;
   function record(level, code) {
     const now = Date.now();
     const last = diagnostics.at(-1);
@@ -160,7 +161,7 @@ export function apply(ctx, config = {}) {
       () => sessionContext, (ctx, sessionId, signal) => applyModel(ctx, config, sessionId, signal));
     await backends.serial(() => {});
     registerManagement(child, () => ({
-      host, port, route, watchTimeout, maxRequest, listening, sessionAPI: !!sessionContext,
+      host, port: actualPort, configuredPort: port, route, watchTimeout, maxRequest, listening, sessionAPI: !!sessionContext,
       diagnostics, backends: backends.view(),
     }), record, backends);
   });
@@ -173,84 +174,115 @@ export function apply(ctx, config = {}) {
       return;
     }
     sessionContext = child;
-    child.on('dispose', () => { sessionContext = undefined; });
+    child.effect(() => () => {
+      if (sessionContext === child) sessionContext = undefined;
+    });
   });
   if (!Number.isInteger(port) || port < 1024 || port > 65535) {
     record('error', 'CONNECTOR_PORT_INVALID');
     return;
   }
-  const server = createServer({ requestTimeout: 10000 }, async (req, res) => {
-    if (req.method !== 'POST' || req.url !== route || req.headers.host !== host + ':' + port ||
-        req.headers['content-type'] !== 'application/octet-stream') {
-      res.writeHead(404).end();
-      return;
-    }
-    let packet, request;
-    try {
-      const chunks = [];
-      let length = 0;
-      for await (const chunk of req) {
-        length += chunk.length;
-        if (length > maxRequest) throw new Error('Request too large');
-        chunks.push(chunk);
+  ctx.effect(() => {
+    let disposed = false;
+    let fallback = false;
+    let publication = Promise.resolve();
+    let settleStartup;
+    const startup = new Promise(resolve => { settleStartup = resolve; });
+    const server = createServer({ requestTimeout: 10000 }, async (req, res) => {
+      if (req.method !== 'POST' || req.url !== route || req.headers.host !== host + ':' + actualPort ||
+          req.headers['content-type'] !== 'application/octet-stream') {
+        res.writeHead(404).end();
+        return;
       }
-      packet = Buffer.concat(chunks);
-      request = JSON.parse(decrypt(key, packet));
-      const now = Date.now();
-      const nonce = packet.subarray(0, 12).toString('hex');
-      for (const [seen, expires] of recent) {
-        if (expires <= now) recent.delete(seen);
-        else break;
+      let packet, request;
+      try {
+        const chunks = [];
+        let length = 0;
+        for await (const chunk of req) {
+          length += chunk.length;
+          if (length > maxRequest) throw new Error('Request too large');
+          chunks.push(chunk);
+        }
+        packet = Buffer.concat(chunks);
+        request = JSON.parse(decrypt(key, packet));
+        const now = Date.now();
+        const nonce = packet.subarray(0, 12).toString('hex');
+        for (const [seen, expires] of recent) {
+          if (expires <= now) recent.delete(seen);
+          else break;
+        }
+        if (!Number.isSafeInteger(request.at) || Math.abs(request.at - now) > 60000 ||
+            recent.has(nonce) || recent.size >= 4096) throw new Error('Invalid request timestamp or nonce');
+        recent.set(nonce, now + 120000);
+      } catch {
+        res.writeHead(401).end();
+        return;
       }
-      if (!Number.isSafeInteger(request.at) || Math.abs(request.at - now) > 60000 ||
-          recent.has(nonce) || recent.size >= 4096) throw new Error('Invalid request timestamp or nonce');
-      recent.set(nonce, now + 120000);
-    } catch {
-      res.writeHead(401).end();
-      return;
-    }
 
-    const abort = new AbortController();
-    res.once('close', () => abort.abort());
-    let result;
-    try {
-      if (!sessionContext || !backends) throw Object.assign(new Error('DSH backend services are unavailable'), { code: 'connector/session-api-unavailable' });
-      const value = await dispatch(sessionContext, config, backends, request.method, request.args?.request ?? request.args?._request, abort.signal);
-      result = { ok: true, value };
-    } catch (error) {
-      if (!abort.signal.aborted && error?.code !== 'connector/backend-not-ready') {
-        const code = typeof error?.code === 'string' && /^[\w./-]{1,80}$/.test(error.code) ? error.code : 'CONNECTOR_RPC_ERROR';
-        record('error', code);
+      const abort = new AbortController();
+      res.once('close', () => abort.abort());
+      let result;
+      try {
+        if (!sessionContext || !backends) throw Object.assign(new Error('DSH backend services are unavailable'), { code: 'connector/session-api-unavailable' });
+        const value = await dispatch(sessionContext, config, backends, request.method, request.args?.request ?? request.args?._request, abort.signal);
+        result = { ok: true, value };
+      } catch (error) {
+        if (!abort.signal.aborted && error?.code !== 'connector/backend-not-ready') {
+          const code = typeof error?.code === 'string' && /^[\w./-]{1,80}$/.test(error.code) ? error.code : 'CONNECTOR_RPC_ERROR';
+          record('error', code);
+        }
+        result = { ok: false, error: { code: error.code ?? 'connector/internal', message: String(error.message) } };
       }
-      result = { ok: false, error: { code: error.code ?? 'connector/internal', message: String(error.message) } };
+      if (!res.destroyed) {
+        res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-store' });
+        res.end(encrypt(key, packet.subarray(0, 12), { result }));
+      }
+    });
+    server.on('error', error => {
+      if (!disposed && error.code === 'EADDRINUSE' && !fallback) {
+        fallback = true;
+        record('warning', 'CONNECTOR_PORT_IN_USE');
+        server.listen(0, host);
+        return;
+      }
+      settleStartup();
+      listening = false;
+      record('error', error.code === 'EADDRINUSE' ? 'CONNECTOR_PORT_IN_USE' : 'CONNECTOR_LISTEN_FAILED');
+      logger.error('Could not listen on %s:%d: %s', host, port, error.message);
+    });
+    async function publish() {
+      const temp = discoveryFile + '.' + randomBytes(8).toString('hex') + '.tmp';
+      try {
+        await mkdir(dirname(discoveryFile), { recursive: true, mode: 0o700 });
+        await writeFile(temp, JSON.stringify({ version: 1, port: actualPort, key: key.toString('base64') }), { mode: 0o600, flag: 'wx' });
+        if (disposed) return;
+        await rename(temp, discoveryFile);
+        listening = true;
+        record('info', 'CONNECTOR_READY');
+        logger.info('TodoList connector listening on %s:%d', host, actualPort);
+      } catch (error) {
+        record('error', 'CONNECTOR_DISCOVERY_WRITE_FAILED');
+        await unlink(temp).catch(() => {});
+        logger.error('Could not publish TodoList connector endpoint: %s', error.message);
+        server.close();
+      } finally {
+        await unlink(temp).catch(() => {});
+      }
     }
-    if (!res.destroyed) {
-      res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-store' });
-      res.end(encrypt(key, packet.subarray(0, 12), { result }));
-    }
-  });
-  server.on('error', error => {
-    record('error', error.code === 'EADDRINUSE' ? 'CONNECTOR_PORT_IN_USE' : 'CONNECTOR_LISTEN_FAILED');
-    logger.error('Could not listen on %s:%d: %s', host, port, error.message);
-  });
-  server.listen(port, host, async () => {
-    const temp = discoveryFile + '.' + randomBytes(8).toString('hex') + '.tmp';
-    try {
-      await mkdir(dirname(discoveryFile), { recursive: true, mode: 0o700 });
-      await writeFile(temp, JSON.stringify({ version: 1, port, key: key.toString('base64') }), { mode: 0o600, flag: 'wx' });
-      await rename(temp, discoveryFile);
-      listening = true;
-      record('info', 'CONNECTOR_READY');
-      logger.info('TodoList connector listening on %s:%d', host, port);
-    } catch (error) {
-      record('error', 'CONNECTOR_DISCOVERY_WRITE_FAILED');
-      await unlink(temp).catch(() => {});
-      logger.error('Could not publish TodoList connector endpoint: %s', error.message);
-      server.close();
-    }
-  });
-  ctx.on('dispose', () => {
-    server.close();
-    server.closeAllConnections();
+    server.on('listening', () => {
+      actualPort = server.address().port;
+      if (!disposed) publication = publish();
+      settleStartup();
+    });
+    server.listen(port, host);
+    return async () => {
+      disposed = true;
+      listening = false;
+      await startup;
+      const closed = new Promise(resolve => { server.close(() => resolve()); });
+      server.closeAllConnections();
+      await Promise.all([closed, publication]);
+      listening = false;
+    };
   });
 }

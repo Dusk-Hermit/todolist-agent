@@ -34,3 +34,4 @@ Thumbs.db
 *.aab
 *.jks
 *.keystore
+/dsh-connector/node_modules/
