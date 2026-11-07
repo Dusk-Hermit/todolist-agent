@@ -14,6 +14,7 @@ import (
 )
 
 const promptCollectTime = 5 * time.Second
+const livePromptCollectTime = 350 * time.Millisecond
 const maxPromptBytes = 64000
 
 var errBatchRunning = errors.New("DSH 正在处理消息，完成后会自动同步")
@@ -23,6 +24,7 @@ type queuedPrompt struct {
 	Text string `json:"text"`
 	At   int64  `json:"at"`
 	Host string `json:"host,omitempty"`
+	Live bool   `json:"live,omitempty"`
 }
 
 type activePrompt struct {
@@ -79,7 +81,7 @@ func (a *App) enqueuePrompts(prompts []queuedPrompt) error {
 		}
 		next.Messages = slices.Clone(next.Messages)
 	}
-	changed := false
+	changed, backlog := false, false
 	for _, p := range prompts {
 		if next.QueueReceipts[p.ID] || journalIDs[p.ID] {
 			continue
@@ -87,6 +89,7 @@ func (a *App) enqueuePrompts(prompts []queuedPrompt) error {
 		next.Queue[p.ID] = p
 		next.QueueReceipts[p.ID] = true
 		changed = true
+		backlog = backlog || !p.Live
 		if a.dsh != nil {
 			next.Messages = append(next.Messages, ChatMessage{ID: p.ID, Text: p.Text, At: p.At,
 				Kind: "input", Status: "queued"})
@@ -96,8 +99,14 @@ func (a *App) enqueuePrompts(prompts []queuedPrompt) error {
 		a.mu.Unlock()
 		return nil
 	}
-	if a.dsh != nil && len(a.state.Queue) == 0 && a.state.ActivePrompt == nil {
-		next.QueueReadyAt = time.Now().Add(promptCollectTime).UnixMilli()
+	if a.dsh != nil && a.state.ActivePrompt == nil {
+		if len(a.state.Queue) == 0 || (backlog && !hasBacklog(a.state.Queue)) {
+			delay := livePromptCollectTime
+			if backlog {
+				delay = promptCollectTime
+			}
+			next.QueueReadyAt = max(next.QueueReadyAt, time.Now().Add(delay).UnixMilli())
+		}
 	}
 	if a.dsh != nil {
 		slices.SortFunc(next.Messages, compareMessages)
@@ -114,6 +123,15 @@ func (a *App) enqueuePrompts(prompts []queuedPrompt) error {
 		a.emit("lan", a.bindingLANState())
 	}
 	return err
+}
+
+func hasBacklog(queue map[string]queuedPrompt) bool {
+	for _, prompt := range queue {
+		if !prompt.Live {
+			return true
+		}
+	}
+	return false
 }
 
 // A timed-out delivery can have been committed. Persist a single execution
@@ -149,7 +167,8 @@ func (a *App) assignPrompts(host string, includeFresh bool) ([]queuedPrompt, err
 }
 
 func (a *App) bindingSendInput(text string) (map[string]any, error) {
-	p := queuedPrompt{ID: uuid.NewString(), Text: strings.TrimSpace(text), At: time.Now().UnixMilli()}
+	p := queuedPrompt{ID: uuid.NewString(), Text: strings.TrimSpace(text), At: time.Now().UnixMilli(),
+		Live: a.getStatus().Connected}
 	if err := a.enqueuePrompts([]queuedPrompt{p}); err != nil {
 		return nil, err
 	}
@@ -175,16 +194,14 @@ func (a *App) batchPausedLocked() bool {
 }
 
 func (c *DSHClient) pumpQueue(ctx context.Context, selected *sessionRow, sessions []sessionRow) {
-	if c.recheckHistory.Swap(false) {
-		clear(c.queueHistory)
-	}
 	a := c.app
 	a.mu.Lock()
 	active := a.state.ActivePrompt
 	if active != nil {
 		a.mu.Unlock()
+		c.watchPrompt(ctx, active)
 		row := findSession(sessions, active.Session)
-		if outcome := c.queuedResult(ctx, active, row); outcome.status != "" {
+		if outcome := c.connectorResult(ctx, active); outcome.status != "" {
 			c.finishQueued(active, outcome)
 		} else if outcome.stage == "queued" || outcome.stage == "accepted" || outcome.stage == "running" {
 			if !active.Accepted {
@@ -199,10 +216,11 @@ func (c *DSHClient) pumpQueue(ctx context.Context, selected *sessionRow, session
 		}
 		return
 	}
+	c.watchPrompt(ctx, nil)
 	if selected == nil || selected.Running || len(a.state.Queue) == 0 ||
 		time.Now().UnixMilli() < a.state.QueueReadyAt || a.quitting {
 		a.mu.Unlock()
-		c.reconcileUncertain(ctx, sessions)
+		c.reconcileUncertain(ctx)
 		return
 	}
 	item := orderedQueue(a.state.Queue)[0]
@@ -233,6 +251,11 @@ func (c *DSHClient) pumpQueue(ctx context.Context, selected *sessionRow, session
 	raw, err := c.call(ctx, "session/prompt", promptArgs(item.ID, active.Session,
 		todoPromptText(item.Text, item.ID)))
 	if err != nil {
+		var rejected *rpcError
+		if errors.As(err, &rejected) && rejected.Code == "connector/model-unavailable" {
+			c.finishQueued(active, promptOutcome{status: "failed", detail: "DSH 插件的模型设置不可用：" + rejected.Message})
+			return
+		}
 		// The request may have reached DSH before a transport failure.
 		// Keep the claim and reconcile it from session activity.
 		c.Wake()
@@ -250,20 +273,8 @@ func (c *DSHClient) pumpQueue(ctx context.Context, selected *sessionRow, session
 		return
 	}
 	a.markPromptAccepted(active)
+	c.watchPrompt(ctx, active)
 	c.Wake()
-}
-
-func queuedProjectionResult(active *activePrompt, row *sessionRow) promptOutcome {
-	if row == nil || row.Running {
-		return promptOutcome{}
-	}
-	for _, turn := range row.Projections.Values.TurnOutline {
-		if turn.Response != "" && turn.Seq > active.PreviousSeq &&
-			strings.HasSuffix(strings.TrimSpace(turn.Prompt), "<!-- todo-msg:"+active.ID+" -->") {
-			return promptOutcome{status: "sent", response: turn.Response}
-		}
-	}
-	return promptOutcome{}
 }
 
 func (c *DSHClient) expireActivePrompt(reason string) {
@@ -280,22 +291,14 @@ func (c *DSHClient) expireActivePrompt(reason string) {
 	}
 }
 
-func (c *DSHClient) reconcileUncertain(ctx context.Context, sessions []sessionRow) {
+func (c *DSHClient) reconcileUncertain(ctx context.Context) {
 	a := c.app
 	a.mu.Lock()
 	pending := maps.Clone(a.state.UncertainPrompts)
 	a.mu.Unlock()
-	sessionsWithPending := make(map[string]bool, len(pending))
 	for _, prompt := range pending {
-		if outcome := c.queuedResult(ctx, &prompt, findSession(sessions, prompt.Session)); outcome.status != "" {
+		if outcome := c.connectorResult(ctx, &prompt); outcome.status != "" {
 			c.finishQueued(&prompt, outcome)
-		} else {
-			sessionsWithPending[prompt.Session] = true
-		}
-	}
-	for session := range c.queueHistory {
-		if !sessionsWithPending[session] {
-			delete(c.queueHistory, session)
 		}
 	}
 }
@@ -465,11 +468,15 @@ func (c *DSHClient) finishQueued(active *activePrompt, outcome promptOutcome) {
 		})
 	}
 	err := a.persistLocked(next)
+	batchSettled := !a.batchPausedLocked()
 	a.mu.Unlock()
 	if err == nil {
 		a.emitState()
 		a.emit("lan", a.bindingLANState())
 		if s := a.getLAN(); s != nil {
+			if batchSettled && s.discovery != nil {
+				s.discovery.notifySync()
+			}
 			s.signal()
 		}
 		c.Wake()

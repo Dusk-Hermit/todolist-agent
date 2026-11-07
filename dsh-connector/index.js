@@ -3,10 +3,18 @@ import { mkdir, rename, unlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import z from '@deepseek-ai/schemastery';
 import { queuedInAgent, receiptFromEvents } from './receipt.js';
 
 export const name = 'todolist-agent-connector';
-export const inject = ['agents', 'sessionController', 'sessionQuery'];
+export const inject = ['agents', 'llm', 'sessionController', 'sessionQuery'];
+export const Config = z.object({
+  port: z.number().min(1024).max(65535).default(17892),
+  discoveryFile: z.string(),
+  provider: z.string().default('').volatile(),
+  model: z.string().default('').volatile(),
+  reasoningEffort: z.string().default('').volatile(),
+});
 
 const route = '/todolist/v1/rpc';
 const host = '127.0.0.1';
@@ -32,7 +40,48 @@ function validID(value) {
   return typeof value === 'string' && /^[\w.-]{1,160}$/.test(value);
 }
 
-async function dispatch(ctx, method, args, signal) {
+async function status(ctx, args, signal) {
+  let observation;
+  try {
+    observation = await ctx.sessionQuery.observeSession(args.sessionId, { signal, projectionMode: 'none' });
+    const receipt = receiptFromEvents(observation.events, args.requestId, observation.inheritedEventCount);
+    if (receipt.stage !== 'not-found') return receipt;
+    return queuedInAgent(ctx.agents.get(args.sessionId), args.requestId) ? { stage: 'queued' } : receipt;
+  } catch (error) {
+    if (error.code === 'SESSION_QUERY_SESSION_NOT_FOUND') return { stage: 'session-not-found' };
+    throw error;
+  } finally {
+    observation?.[Symbol.dispose]();
+  }
+}
+
+async function waitForStatus(ctx, args, signal) {
+  // Subscribe before reading, so a turn ending during the read cannot be missed.
+  let notify;
+  let changed = new Promise(resolve => { notify = resolve; });
+  const dispose = ctx.on('session/event', (session, event) => {
+    if (session.id === args.sessionId && event.type === 'turn/end') notify();
+  }, { global: true });
+  const timeout = AbortSignal.any([signal, AbortSignal.timeout(9000)]);
+  let stop;
+  const expired = new Promise(resolve => { stop = resolve; });
+  timeout.addEventListener('abort', stop, { once: true });
+  try {
+    for (;;) {
+      const receipt = await status(ctx, args, signal);
+      // An admitted prompt can leave the inbox before its user event is
+      // appended. Keep waiting across that gap as well.
+      if (timeout.aborted || ['completed', 'failed', 'session-not-found'].includes(receipt.stage)) return receipt;
+      await Promise.race([changed, expired]);
+      changed = new Promise(resolve => { notify = resolve; });
+    }
+  } finally {
+    timeout.removeEventListener('abort', stop);
+    dispose();
+  }
+}
+
+async function dispatch(ctx, config, method, args, signal) {
   const controller = ctx.sessionController;
   switch (method) {
     case 'session/list':
@@ -47,26 +96,37 @@ async function dispatch(ctx, method, args, signal) {
       if (!validID(args?.sessionId) || !validID(args.requestId) || args.mode !== 'queue' ||
           !Array.isArray(args.content) || args.content.length !== 1 ||
           args.content[0]?.type !== 'text' || typeof args.content[0].text !== 'string') break;
+      {
+        const provider = config.provider.get();
+        const model = config.model.get();
+        const reasoningEffort = config.reasoningEffort.get();
+        if (provider && model) {
+          const { agent, error } = await controller.resolveAgent(args.sessionId);
+          if (error) throw error;
+          const current = agent.model.current();
+          const effort = reasoningEffort || undefined;
+          if (current?.provider !== provider || current.model !== model || current.reasoningEffort !== effort) {
+            const selection = { provider, model, ...(effort ? { reasoningEffort: effort } : {}) };
+            try {
+              await ctx.llm.resolveCallConfig(selection);
+            } catch (error) {
+              throw Object.assign(new Error(error.message), { code: 'connector/model-unavailable' });
+            }
+            signal.throwIfAborted();
+            // Use the linked Session model without changing the global DSH default.
+            agent.model.select(selection);
+          }
+        }
+      }
       return controller.prompt({
         sessionId: args.sessionId, requestId: args.requestId, mode: 'queue',
         content: [{ type: 'text', text: args.content[0].text }],
         clientTimeZone: typeof args.clientTimeZone === 'string' ? args.clientTimeZone : undefined,
       }, signal);
-    case 'todolist/status': {
+    case 'todolist/status':
+    case 'todolist/wait':
       if (!validID(args?.sessionId) || !validID(args.requestId)) break;
-      let observation;
-      try {
-        observation = await ctx.sessionQuery.observeSession(args.sessionId, { signal, projectionMode: 'none' });
-        const receipt = receiptFromEvents(observation.events, args.requestId, observation.inheritedEventCount);
-        if (receipt.stage !== 'not-found') return receipt;
-        return queuedInAgent(ctx.agents.get(args.sessionId), args.requestId) ? { stage: 'queued' } : receipt;
-      } catch (error) {
-        if (error.code === 'SESSION_QUERY_SESSION_NOT_FOUND') return { stage: 'session-not-found' };
-        throw error;
-      } finally {
-        observation?.[Symbol.dispose]();
-      }
-    }
+      return method === 'todolist/wait' ? waitForStatus(ctx, args, signal) : status(ctx, args, signal);
   }
   throw Object.assign(new Error('Unsupported method or invalid arguments'), { code: 'connector/bad-request' });
 }
@@ -113,7 +173,7 @@ export function apply(ctx, config = {}) {
     res.once('close', () => abort.abort());
     let result;
     try {
-      const value = await dispatch(ctx, request.method, request.args?.request ?? request.args?._request, abort.signal);
+      const value = await dispatch(ctx, config, request.method, request.args?.request ?? request.args?._request, abort.signal);
       result = { ok: true, value };
     } catch (error) {
       result = { ok: false, error: { code: error.code ?? 'connector/internal', message: String(error.message) } };

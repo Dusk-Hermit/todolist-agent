@@ -1,29 +1,19 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
 )
-
-var errUnauthorized = errors.New("dsh web authentication failed")
 
 type sessionRow struct {
 	SessionID      string `json:"sessionId"`
@@ -63,6 +53,10 @@ type rpcError struct {
 	Details json.RawMessage `json:"details"`
 }
 
+func (e *rpcError) Error() string {
+	return e.Code + ": " + e.Message
+}
+
 type rpcEnvelope struct {
 	Type   string `json:"type"`
 	RpcID  string `json:"rpcId"`
@@ -77,16 +71,15 @@ type DSHClient struct {
 	app  *App
 	http *http.Client
 
-	mu        sync.Mutex
-	conn      dshEndpoint
-	reconnect atomic.Bool
+	mu   sync.Mutex
+	conn dshEndpoint
 
 	reqMu  sync.Mutex
 	wake   chan struct{}
 	cancel context.CancelFunc
 
-	queueHistory   map[string]*dshQueueHistory // accessed only by the DSH polling loop
-	recheckHistory atomic.Bool
+	watchID     string
+	watchCancel context.CancelFunc
 }
 
 func newDSHClient(a *App) *DSHClient {
@@ -94,6 +87,9 @@ func newDSHClient(a *App) *DSHClient {
 		app: a,
 		http: &http.Client{
 			Timeout: 25 * time.Second,
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 			Transport: &http.Transport{
 				Proxy:                 nil,
 				MaxIdleConns:          8,
@@ -125,25 +121,6 @@ func (c *DSHClient) Wake() {
 	case c.wake <- struct{}{}:
 	default:
 	}
-}
-
-// Reconfigure applies a manual DSH address/session choice and wakes the poller.
-func (c *DSHClient) Reconfigure(baseURL, sessionID string) {
-	base := normalizeBase(baseURL)
-	a := c.app
-	a.mu.Lock()
-	changed := a.state.DSH.ManualURL != base
-	a.state.DSH.ManualURL = base
-	if sessionID != "" {
-		a.state.DSH.SessionID = sessionID
-	}
-	a.mu.Unlock()
-	if changed {
-		c.reconnect.Store(true)
-	}
-	a.markDirty()
-	a.emitState()
-	c.Wake()
 }
 
 // SelectSession changes the session the composer targets.
@@ -248,6 +225,13 @@ func (c *DSHClient) loop(ctx context.Context) {
 		if st.Running || st.Sending {
 			interval = 1200 * time.Millisecond
 		}
+		c.app.mu.Lock()
+		if c.app.state.ActivePrompt == nil && len(c.app.state.Queue) > 0 {
+			if remaining := time.Until(time.UnixMilli(c.app.state.QueueReadyAt)); remaining > 0 {
+				interval = min(interval, remaining)
+			}
+		}
+		c.app.mu.Unlock()
 		if !sleepOrWake(ctx, c.wake, interval) {
 			return
 		}
@@ -321,29 +305,13 @@ func (c *DSHClient) reportError(err error) {
 
 func (c *DSHClient) connect(ctx context.Context) error {
 	c.setConnecting()
-	c.app.mu.Lock()
-	manual := c.app.state.DSH.ManualURL
-	c.app.mu.Unlock()
-	if env := normalizeBase(os.Getenv("DSH_WEB_URL")); env != "" {
-		manual = env
-	}
-	var conn dshEndpoint
-	var err error
-	if manual != "" {
-		conn.base = manual
-		conn.secret, err = readDSHSecret()
-	} else {
-		conn, err = readDSHConnector()
-	}
+	conn, err := readDSHConnector()
 	if err != nil {
 		return err
 	}
 	items, err := c.listAt(ctx, conn, 8*time.Second)
 	if err != nil {
-		if conn.plugin {
-			return fmt.Errorf("无法连接 DSH 插件，请确认已启动安装插件的 DSH：%w", err)
-		}
-		return err
+		return fmt.Errorf("无法连接 DSH 插件，请确认已启动安装插件的 DSH：%w", err)
 	}
 	c.activate(ctx, conn, items)
 	return nil
@@ -398,6 +366,7 @@ func (c *DSHClient) createDedicated(ctx context.Context, conn dshEndpoint, cwd s
 }
 
 func (c *DSHClient) activate(ctx context.Context, conn dshEndpoint, items []sessionRow) {
+	c.watchPrompt(ctx, nil)
 	c.mu.Lock()
 	c.conn = conn
 	c.mu.Unlock()
@@ -531,9 +500,6 @@ func findSession(items []sessionRow, id string) *sessionRow {
 }
 
 func (c *DSHClient) refresh(ctx context.Context) error {
-	if c.reconnect.Swap(false) {
-		return c.connect(ctx)
-	}
 	conn := c.endpoint()
 	items, err := c.listAt(ctx, conn, 20*time.Second)
 	if err != nil {
@@ -689,18 +655,7 @@ func (c *DSHClient) listAt(ctx context.Context, conn dshEndpoint, timeout time.D
 func (c *DSHClient) call(ctx context.Context, method string, args any) (json.RawMessage, error) {
 	c.reqMu.Lock()
 	defer c.reqMu.Unlock()
-	conn := c.endpoint()
-	raw, _, err := c.invoke(ctx, conn, method, args, 25*time.Second)
-	if errors.Is(err, errUnauthorized) && !conn.plugin {
-		// The legacy Web signing key can rotate independently of the app.
-		if fresh, readErr := readDSHSecret(); readErr == nil && !bytes.Equal(fresh, conn.secret) {
-			conn.secret = fresh
-			c.mu.Lock()
-			c.conn = conn
-			c.mu.Unlock()
-			raw, _, err = c.invoke(ctx, conn, method, args, 25*time.Second)
-		}
-	}
+	raw, _, err := c.invoke(ctx, c.endpoint(), method, args, 25*time.Second)
 	return raw, err
 }
 
@@ -708,59 +663,7 @@ func (c *DSHClient) invoke(ctx context.Context, conn dshEndpoint, method string,
 	if conn.base == "" {
 		return nil, 0, fmt.Errorf("DSH 尚未连接")
 	}
-	if conn.plugin {
-		return c.callConnector(ctx, conn, method, args, timeout)
-	}
-	cookie, err := mintCookie(conn.base, conn.secret)
-	if err != nil {
-		return nil, 0, err
-	}
-	return c.postWith(ctx, conn.base, cookie, method, args, timeout)
-}
-
-func (c *DSHClient) postWith(ctx context.Context, base, cookie, method string, args any, timeout time.Duration) (json.RawMessage, int, error) {
-	payload := map[string]any{
-		"type":   "client-request",
-		"rpcId":  uuid.NewString(),
-		"method": method,
-		"payload": map[string]any{
-			"args": args,
-		},
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return nil, 0, err
-	}
-	u := strings.TrimRight(base, "/") + "/api/" + method
-	reqCtx := ctx
-	var cancel context.CancelFunc
-	if timeout > 0 {
-		reqCtx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
-	}
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, u, bytes.NewReader(body))
-	if err != nil {
-		return nil, 0, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Cookie", cookie)
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, 0, fmt.Errorf("连接 DSH 失败: %w", err)
-	}
-	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
-	if err != nil {
-		return nil, resp.StatusCode, err
-	}
-	if resp.StatusCode == http.StatusUnauthorized {
-		return nil, resp.StatusCode, errUnauthorized
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, resp.StatusCode, fmt.Errorf("DSH 返回 HTTP %d: %s", resp.StatusCode, truncateRunes(string(data), 180))
-	}
-	return decodeDSHResult(data, resp.StatusCode)
+	return c.callConnector(ctx, conn, method, args, timeout)
 }
 
 func decodeDSHResult(data []byte, status int) (json.RawMessage, int, error) {
@@ -770,7 +673,7 @@ func decodeDSHResult(data []byte, status int) (json.RawMessage, int, error) {
 	}
 	if !env.Result.OK {
 		if env.Result.Error != nil {
-			return nil, status, fmt.Errorf("%s: %s", env.Result.Error.Code, env.Result.Error.Message)
+			return nil, status, env.Result.Error
 		}
 		return nil, status, fmt.Errorf("DSH 调用失败")
 	}
@@ -939,116 +842,4 @@ func clientTimeZone() string {
 		return tz
 	}
 	return "Asia/Shanghai"
-}
-
-// ---- credentials and cookies ---------------------------------------------
-
-func dshHome() string {
-	if v := strings.TrimSpace(os.Getenv("DSH_HOME")); v != "" {
-		return v
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".dsh")
-}
-
-func readDSHSecret() ([]byte, error) {
-	home := dshHome()
-	if home == "" {
-		return nil, fmt.Errorf("找不到用户目录")
-	}
-	data, err := os.ReadFile(filepath.Join(home, ".credentials.yaml"))
-	if err != nil {
-		return nil, fmt.Errorf("读取 DSH 凭据失败: %w", err)
-	}
-	lines := strings.Split(string(data), "\n")
-	inRecord := false
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "client-connection/browser-session:") {
-			inRecord = true
-			continue
-		}
-		if !inRecord {
-			continue
-		}
-		if strings.HasPrefix(trimmed, "secret:") {
-			val := strings.TrimSpace(strings.TrimPrefix(trimmed, "secret:"))
-			val = strings.Trim(val, "\"'")
-			raw, err := decodeBase64URL(val)
-			if err != nil || len(raw) != 32 {
-				return nil, fmt.Errorf("DSH 浏览器签名密钥格式异常")
-			}
-			return raw, nil
-		}
-		if line != "" && line[0] != ' ' && line[0] != '\t' {
-			inRecord = false
-		}
-	}
-	return nil, fmt.Errorf("DSH 凭据中没有浏览器会话签名密钥")
-}
-
-func decodeBase64URL(s string) ([]byte, error) {
-	s = strings.TrimRight(s, "=")
-	return base64.RawURLEncoding.DecodeString(s)
-}
-
-func encodeBase64URL(b []byte) string {
-	return base64.RawURLEncoding.EncodeToString(b)
-}
-
-func normalizeBase(s string) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return ""
-	}
-	if !strings.Contains(s, "://") {
-		s = "http://" + s
-	}
-	u, err := url.Parse(s)
-	if err != nil || u.Host == "" {
-		return ""
-	}
-	scheme := strings.ToLower(u.Scheme)
-	if scheme != "http" && scheme != "https" {
-		return ""
-	}
-	return scheme + "://" + u.Host
-}
-
-func mintCookie(base string, secret []byte) (string, error) {
-	u, err := url.Parse(base)
-	if err != nil || u.Host == "" {
-		return "", fmt.Errorf("DSH 地址无效")
-	}
-	authority := u.Host
-	name := "dsh-auth-" + encodeBase64URL(sha256Sum([]byte(authority)))
-	now := time.Now().UnixMilli()
-	payload := struct {
-		Version   int    `json:"version"`
-		Authority string `json:"authority"`
-		IssuedAt  int64  `json:"issuedAt"`
-		ExpiresAt int64  `json:"expiresAt"`
-	}{
-		Version:   1,
-		Authority: authority,
-		IssuedAt:  now,
-		ExpiresAt: now + 29*24*60*60*1000,
-	}
-	bodyJSON, err := json.Marshal(payload)
-	if err != nil {
-		return "", err
-	}
-	body := encodeBase64URL(bodyJSON)
-	mac := hmac.New(sha256.New, secret)
-	_, _ = mac.Write([]byte(body))
-	sig := encodeBase64URL(mac.Sum(nil))
-	return name + "=v1." + body + "." + sig, nil
-}
-
-func sha256Sum(b []byte) []byte {
-	h := sha256.Sum256(b)
-	return h[:]
 }

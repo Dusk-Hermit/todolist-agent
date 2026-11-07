@@ -171,7 +171,7 @@ func chooseDSH(peers []lanPeer, preferred string) *lanPeer {
 }
 
 func (p lanPeer) canDispatch() bool {
-	return !p.NeedsUpgrade && p.Platform == "windows" && p.Dispatch && p.DSHAddress != "" &&
+	return !p.NeedsUpgrade && p.Platform == "windows" && p.Dispatch && p.HasDSH &&
 		p.DSH.Connected && p.DSH.SessionID != ""
 }
 
@@ -185,7 +185,7 @@ func (a *App) updateLANStatus(s *lanService) {
 		for _, p := range view.Peers {
 			if p.ID == view.ActiveDSH {
 				status = p.DSH
-				status.BaseURL = p.DSHAddress
+				status.BaseURL = ""
 				break
 			}
 		}

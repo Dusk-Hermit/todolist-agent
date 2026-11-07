@@ -8,7 +8,7 @@
 #>
 [CmdletBinding()]
 param(
-  [string]$Version = "0.4.12",
+  [string]$Version = "0.4.13",
   [switch]$Installer,
   [string]$ISCC
 )

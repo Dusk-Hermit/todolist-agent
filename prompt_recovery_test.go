@@ -2,8 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
@@ -22,20 +20,14 @@ func TestInterruptedDSHTurnSettlesAfterRestart(t *testing.T) {
 	if err := restarted.load(); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/session/events" {
-			t.Errorf("recovery unexpectedly called %s", r.URL.Path)
-		}
-		_, _ = w.Write([]byte(`{"result":{"ok":true,"value":{"records":[
-			{"event":{"type":"turn/start","seq":1,"data":{"turn":1}}},
-			{"event":{"type":"user/message","seq":2,"data":{"content":[{"type":"text","text":"request\n<!-- todo-msg:prompt -->"}]}}},
-			{"event":{"type":"turn/end","seq":3,"data":{"turn":1,"reason":{"kind":"interrupted"}}}}
-		]}}}`))
-	}))
-	defer server.Close()
 	c := newDSHClient(restarted)
 	restarted.dsh = c
-	c.conn = dshEndpoint{base: server.URL, secret: []byte("fixture key")}
+	c.conn = testConnector(t, func(request testConnectorRequest) string {
+		if request.Args.Request.SessionID != "original" || request.Args.Request.RequestID != "prompt" {
+			t.Errorf("wrong receipt query: %+v", request)
+		}
+		return `{"stage":"failed","reason":"interrupted","turn":1}`
+	})
 	row := sessionRow{SessionID: "original", Running: true}
 	row.Projections.AsOfSeq = 3
 	c.pumpQueue(t.Context(), &row, []sessionRow{row})
@@ -117,13 +109,14 @@ func TestPromptAcceptanceIsDurableAndAmbiguousDeliveryIsNotReplayed(t *testing.T
 		restarted.state.Messages[0].Status != "accepted" {
 		t.Fatal("DSH acknowledgement was lost at restart")
 	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Errorf("recovery unexpectedly called %s", r.URL.Path)
-	}))
-	defer server.Close()
 	c := newDSHClient(restarted)
 	restarted.dsh = c
-	c.conn = dshEndpoint{base: server.URL, secret: []byte("fixture key")}
+	c.conn = testConnector(t, func(request testConnectorRequest) string {
+		if request.Method != "todolist/status" && request.Method != "todolist/wait" {
+			t.Errorf("recovery unexpectedly called %s", request.Method)
+		}
+		return `{"stage":"session-not-found"}`
+	})
 	other := sessionRow{SessionID: "other"}
 	c.pumpQueue(t.Context(), &other, []sessionRow{other})
 	c.pumpQueue(t.Context(), &other, []sessionRow{other})

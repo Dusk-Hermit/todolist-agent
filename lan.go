@@ -17,7 +17,6 @@ import (
 	"math/big"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -53,7 +52,7 @@ type lanPeer struct {
 	Name         string    `json:"name"`
 	Platform     string    `json:"platform"`
 	Address      string    `json:"address"`
-	DSHAddress   string    `json:"dshAddress,omitempty"`
+	HasDSH       bool      `json:"hasDSH,omitempty"`
 	DSH          DSHStatus `json:"-"`
 	Paused       bool      `json:"paused"`
 	Dispatch     bool      `json:"dispatch"`
@@ -84,6 +83,7 @@ type lanService struct {
 type lanSighting struct {
 	address string
 	at      time.Time
+	syncAt  int64
 }
 
 func pairingTLS(code string) (*tls.Config, *tls.Config, error) {
@@ -141,6 +141,7 @@ func newLAN(a *App, cfg lanConfig, id string, port int) (*lanService, error) {
 		},
 		discovered: make(map[string]lanSighting), wake: make(chan struct{}, 1),
 	}
+	s.discovery = newLANDiscovery(s)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+lanPrefix+"/info", s.handleInfo)
 	mux.HandleFunc("POST "+lanPrefix+"/sync", s.handleSync)
@@ -164,7 +165,6 @@ func newLAN(a *App, cfg lanConfig, id string, port int) (*lanService, error) {
 }
 
 func (s *lanService) start() {
-	s.discovery = newLANDiscovery(s)
 	s.workers.Go(s.discovery.run)
 	s.workers.Go(s.run)
 }
@@ -370,12 +370,17 @@ func (s *lanService) handleDispatch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-func (s *lanService) uploadQueue(peer lanPeer, assign bool) error {
+func (s *lanService) uploadQueue(peer lanPeer, assign, live bool) error {
 	pending, err := s.app.assignPrompts(peer.ID, assign)
 	if err != nil {
 		return err
 	}
 	for batch := range slices.Chunk(pending, 100) {
+		if !live {
+			for i := range batch {
+				batch[i].Live = false
+			}
+		}
 		var result map[string]bool
 		if err := s.request("POST", peer.Address, "/dispatch", promptDispatch{Host: peer.ID, Prompts: batch}, &result); err != nil {
 			return err
@@ -430,7 +435,7 @@ func (s *lanService) probePeers(addresses map[string]bool) ([]lanPeer, error) {
 		peers = append(peers, lanPeer{ID: info.ID, Name: info.Name, Platform: info.Platform,
 			Address: addr, DSH: info.DSH, Paused: info.Paused, Dispatch: info.Dispatch,
 			NeedsUpgrade: info.MergeVersion != lanMergeVersion,
-			DSHAddress:   peerDSHAddress(addr, info.DSH.BaseURL)})
+			HasDSH:       info.DSH.BaseURL != "" || info.DSH.Connected})
 	}
 	if failed && len(peers) == 0 {
 		return peers, errLANPeerUnreachable
@@ -562,6 +567,7 @@ func (s *lanService) routeQueue(peers []lanPeer, synced map[string]bool) error {
 	preferred := s.app.state.LAN.DSHDevice
 	s.app.mu.Unlock()
 	active := chooseDSH(peers, preferred)
+	previousHost := s.syncedHost
 	if active == nil || active.ID != s.syncedHost {
 		s.syncedHost = ""
 	}
@@ -572,27 +578,10 @@ func (s *lanService) routeQueue(peers []lanPeer, synced map[string]bool) error {
 	for _, peer := range peers {
 		if peer.canDispatch() {
 			assign := peer.ID == s.syncedHost && (synced[peer.ID] || peer.Paused)
-			if err := s.uploadQueue(peer, assign); err != nil {
+			if err := s.uploadQueue(peer, assign, peer.ID == previousHost); err != nil {
 				routeErr = err
 			}
 		}
 	}
 	return routeErr
-}
-
-func peerDSHAddress(addr, base string) string {
-	u, err := url.Parse(base)
-	if err != nil || u.Hostname() == "" {
-		return ""
-	}
-	ip := net.ParseIP(u.Hostname())
-	if (ip != nil && ip.IsLoopback()) || u.Hostname() == "localhost" {
-		host, _, _ := net.SplitHostPort(addr)
-		port := u.Port()
-		u.Host = host
-		if port != "" {
-			u.Host = net.JoinHostPort(host, port)
-		}
-	}
-	return u.String()
 }

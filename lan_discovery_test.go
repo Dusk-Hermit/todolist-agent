@@ -31,3 +31,18 @@ func TestDiscoveryLimitsRepeatedAnnouncements(t *testing.T) {
 		t.Fatal("expired entries prevented discovery")
 	}
 }
+
+func TestSyncNoticeSurvivesAnnouncementsAndRejectsReplays(t *testing.T) {
+	s := &lanService{discovered: make(map[string]lanSighting)}
+	now := time.Now()
+	const addr = "192.168.1.2:17891"
+	s.recordSighting("desktop", addr, false, now)
+	if !s.acceptSyncNotice("desktop", addr, now.UnixMilli(), now) {
+		t.Fatal("first batch completion did not wake sync")
+	}
+	s.recordSighting("desktop", addr, true, now.Add(time.Millisecond))
+	if s.acceptSyncNotice("desktop", addr, now.UnixMilli(), now) ||
+		s.acceptSyncNotice("desktop", addr, now.Add(time.Minute).UnixMilli(), now) {
+		t.Fatal("a replayed or implausibly dated notice woke sync")
+	}
+}

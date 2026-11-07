@@ -115,7 +115,7 @@ TodoList Agent 把这一步搬到了桌面上：
 在每台负责处理消息的 Windows 电脑上，从同一 Release 下载 `todolist-agent-dsh-connector-<版本>.tgz`，用 DSH 自带的命令安装到正在使用的配置。以桌面版为例，在 PowerShell 运行以下命令。
 
 ```powershell
-dsh plugin --profile desktop add "C:\实际下载目录\todolist-agent-dsh-connector-0.4.12.tgz"
+dsh plugin --profile desktop add "C:\实际下载目录\todolist-agent-dsh-connector-0.4.13.tgz"
 ```
 
 使用 DSH Web 版时将 `desktop` 改为 `web`，自定义配置则填入自己的配置名。如果 `dsh` 不在 PATH，可以用 PowerShell 的 `&` 调用 DSH 安装目录下的 `resources\runtime\cli\bin\dsh.cmd`。安装后重启该 DSH 配置，再打开 TodoList Agent，或在设置里点「重新连接」。Android 通过配对电脑获取执行结果。
@@ -147,7 +147,7 @@ dsh plugin --profile desktop add "C:\实际下载目录\todolist-agent-dsh-conne
 
 设备间传输采用配对加密。每次同步只传输有变化的记录。不同任务上的修改会合并。同一任务发生并发冲突时，以该任务最新的编辑或删除为准。删除会保留同步标记，避免旧设备恢复已删除的任务。参与同步的设备都需要升级到 0.4.8 或更新版本。发现机制参考了 [LocalSend](https://github.com/localsend/localsend) 的 IPv4 组播通告和应答。
 
-手机离线时可以连续保存多条消息，并在设置里查看待发队列。连接后，电脑先留出约五秒收集积压，再将已收到的消息按各设备创建时间排序，与本机输入一起逐条交给 DSH。后到的消息会加入尚未发出的队列。DSH 批量处理期间继续接收消息和本地任务编辑，清单在本批处理完成后恢复同步。
+已同步的在线设备发送新消息时，空闲电脑只留约 350 毫秒收集同批输入。离线消息和刚恢复连接的设备仍有约五秒积压收集窗口。电脑将已收到的消息按各设备创建时间排序，与本机输入一起逐条交给 DSH。后到的消息会加入尚未发出的队列。批次完成后，电脑通知配对设备立即同步，定期同步也会继续运行。
 
 在 Android 的系统分享菜单或长按文字的选单中选择 **TodoList Agent**，确认「加入待发队列」即可。分享的文字和在应用内输入的消息走同一条队列。
 
@@ -191,11 +191,11 @@ Windows 和 Android 启动时自动检查 GitHub Release，也可以在「设置
 
 ### DSH 连接与执行回执
 
-插件默认绑定 `127.0.0.1:17892`。需要换端口时，在 DSH 的配置覆盖文件里将插件行 `todolist-agent-connector` 的 `config.port` 改成指定端口。插件将实际端口和每次启动生成的连接密钥写入 `%USERPROFILE%\.dsh\todolist-connector.json`。桌面端只访问这个端口，请求和回执均加密并校验身份。请将这个文件保留在自己的 Windows 账户中。
+插件默认绑定 `127.0.0.1:17892`。需要换端口时，在当前 DSH 配置的 `cordis.patch.yml` 中将插件行 `todolist-agent-connector` 的 `config.port` 改成指定端口。插件将实际端口和每次启动生成的连接密钥写入 `%USERPROFILE%\.dsh\todolist-connector.json`。桌面端只访问这个端口，请求和回执均加密并校验身份。请将这个文件保留在自己的 Windows 账户中。
 
-插件的 `/todolist/v1/rpc` 接口仅允许列出、创建和重命名会话、提交文本消息及查询回执。`todolist/status` 根据原会话记录返回消息进入时间、轮次、结束原因和工具结果摘要。轮次正常结束和单次工具调用成功是两项独立信息。
+插件的 `/todolist/v1/rpc` 接口负责列出、创建和重命名会话、提交文本消息及查询回执。`todolist/status` 根据原会话记录返回消息进入时间、轮次、结束原因和工具结果摘要。`todolist/wait` 订阅轮次结束事件，桌面端同时保留定期查询以便重连恢复。
 
-旧版 DSH Web API 仍可通过设置中的手动地址或显式的 `DSH_WEB_URL` 使用。该模式使用 DSH 的短期 Web Cookie 和旧版状态核对。将手动地址留空并取消 `DSH_WEB_URL` 即可切回插件。确需配置远程 DSH 时，使用带有效证书的 HTTPS 地址。
+在 DSH 的「插件 → todolist-agent-dsh-connector」可选择模型后端、模型和推理强度。保存后，TodoList 下次发送时会把这些设置应用到所选会话。选择「跟随会话设置」则沿用该会话当前的模型。TodoList Windows 端只连接插件端口，Android 只连接配对电脑的局域网服务。
 
 ### 专用会话
 

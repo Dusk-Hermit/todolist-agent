@@ -221,11 +221,12 @@ func (a *App) bindingWindowAction(action string) map[string]any {
 	return map[string]any{"ok": true}
 }
 
-func (a *App) bindingConnectDSH(baseURL, sessionID string) map[string]any {
+func (a *App) bindingConnectDSH(sessionID string) map[string]any {
 	if a.dsh == nil {
 		return map[string]any{"ok": false, "error": "DSH 客户端尚未启动"}
 	}
-	a.dsh.Reconfigure(baseURL, sessionID)
+	a.dsh.SelectSession(sessionID)
+	a.dsh.Wake()
 	return map[string]any{"ok": true}
 }
 
@@ -238,7 +239,6 @@ func (a *App) bindingRefreshSessions() []SessionOption {
 
 func (a *App) bindingRecheckPrompts() {
 	if a.dsh != nil {
-		a.dsh.recheckHistory.Store(true)
 		a.dsh.Wake()
 	}
 }

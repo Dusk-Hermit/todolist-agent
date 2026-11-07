@@ -24,6 +24,7 @@ type lanAnnouncement struct {
 	ID       string `json:"id"`
 	Port     int    `json:"port"`
 	Announce bool   `json:"announce"`
+	SyncAt   int64  `json:"syncAt,omitempty"`
 }
 
 type lanPacket struct {
@@ -135,8 +136,16 @@ func (d *lanDiscovery) updateInterfaces() {
 }
 
 func (d *lanDiscovery) announce(announce bool) {
+	d.send(announce, 0)
+}
+
+func (d *lanDiscovery) notifySync() {
+	d.send(false, time.Now().UnixMilli())
+}
+
+func (d *lanDiscovery) send(announce bool, syncAt int64) {
 	s := d.service
-	a := lanAnnouncement{ID: s.id, Port: s.port, Announce: announce}
+	a := lanAnnouncement{ID: s.id, Port: s.port, Announce: announce, SyncAt: syncAt}
 	body, _ := json.Marshal(lanPacket{Announcement: a, MAC: s.discoveryMAC(a)})
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -162,14 +171,32 @@ func (d *lanDiscovery) listen(socket *net.UDPConn) {
 			continue
 		}
 		address := net.JoinHostPort(src.Addr().String(), strconv.Itoa(a.Port))
-		isNew, reply := s.recordSighting(a.ID, address, a.Announce, time.Now())
-		if isNew {
+		now := time.Now()
+		isNew, reply := s.recordSighting(a.ID, address, a.Announce, now)
+		notify := s.acceptSyncNotice(a.ID, address, a.SyncAt, now)
+		if isNew || notify {
 			s.signal()
 		}
 		if reply {
 			d.announce(false)
 		}
 	}
+}
+
+func (s *lanService) acceptSyncNotice(id, address string, stamp int64, now time.Time) bool {
+	if stamp == 0 || now.Sub(time.UnixMilli(stamp)).Abs() > lanSightingTTL {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := id + "|" + address
+	p, exists := s.discovered[key]
+	if !exists || stamp <= p.syncAt {
+		return false
+	}
+	p.syncAt = stamp
+	s.discovered[key] = p
+	return true
 }
 
 func (s *lanService) recordSighting(id, address string, announce bool, now time.Time) (isNew, reply bool) {
@@ -182,7 +209,7 @@ func (s *lanService) recordSighting(id, address string, announce bool, now time.
 			delete(s.discovered, key)
 		}
 	}
-	_, existing := s.discovered[key]
+	previous, existing := s.discovered[key]
 	if !existing {
 		if len(s.discovered) >= maxDiscoverySightings {
 			return false, false
@@ -197,7 +224,7 @@ func (s *lanService) recordSighting(id, address string, announce bool, now time.
 			return false, false
 		}
 	}
-	s.discovered[key] = lanSighting{address: address, at: now}
+	s.discovered[key] = lanSighting{address: address, at: now, syncAt: previous.syncAt}
 	if announce && now.Sub(s.lastDiscoveryReply) >= 250*time.Millisecond {
 		s.lastDiscoveryReply = now
 		reply = true

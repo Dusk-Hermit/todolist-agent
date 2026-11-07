@@ -1164,14 +1164,14 @@
       ? `已启用 · 发现 ${peers.length} 台设备${active ? " · 当前代发 " + active.name : ""}${paused ? " · DSH 处理完后自动同步" : ""}`
       : "在一台设备生成配对码，再粘贴到同一局域网内的其他设备。");
     $("lanPeers").innerHTML = peers.map((p) =>
-      `<li>${esc(p.name)} · ${esc(p.address)}${p.needsUpgrade ? " · 同步需升级" : p.dshAddress ? (p.dispatch ? " · DSH" : " · DSH 代发需升级") : ""}</li>`).join("");
-    const choices = peers.filter((p) => !p.needsUpgrade && p.platform === "windows" && p.dispatch && p.dshAddress);
+      `<li>${esc(p.name)} · ${esc(p.address)}${p.needsUpgrade ? " · 同步需升级" : p.hasDSH ? (p.dispatch ? " · DSH" : " · DSH 代发需升级") : ""}</li>`).join("");
+    const choices = peers.filter((p) => !p.needsUpgrade && p.platform === "windows" && p.dispatch && p.hasDSH);
     const select = $("lanDSH");
     const preferred = S.lan.dshDevice || "";
     const offline = preferred && !choices.some((p) => p.id === preferred)
       ? `<option value="${esc(preferred)}">首选电脑暂不可用</option>` : "";
     const options = '<option value="">自动选择</option>' + offline + choices.map((p) =>
-      `<option value="${esc(p.id)}">${esc(p.name)} · ${esc(p.dshAddress)}</option>`).join("");
+      `<option value="${esc(p.id)}">${esc(p.name)} · ${esc(p.address)}</option>`).join("");
     if (select.dataset.options !== options) {
       select.innerHTML = options;
       select.dataset.options = options;
@@ -1224,7 +1224,6 @@
   function updateSettings(fillInputs) {
     if (!S.data) return;
     const d = S.data.dsh || {};
-    const cfg = S.data.config || {};
     const bridge = S.data.bridge || {};
 
     const status = $("connStatus");
@@ -1245,12 +1244,9 @@
     }
     $("connHint").textContent = d.error
       ? d.error
-      : cfg.manualUrl
-        ? "当前使用手动配置的 DSH Web 地址。"
-        : "默认通过本机 TodoList 连接插件访问 DSH 和核对执行状态。";
+      : "通过本机 TodoList 连接插件访问 DSH。模型和推理强度在 DSH 的插件页设置。";
 
     if (fillInputs) {
-      $("baseUrlInput").value = cfg.manualUrl || "";
       $("writeAgents").checked = S.data.prefs.writeAgents !== false;
       $("alwaysOnTop").checked = !!S.data.prefs.alwaysOnTop;
       $("compactPref").checked = S.viewMode === "compact";
@@ -1317,10 +1313,9 @@
   }
 
   async function connectDSH() {
-    const base = $("baseUrlInput").value.trim();
     const session = $("sessionSelect").value;
     try {
-      await call("todo_connectDSH", base, session);
+      await call("todo_connectDSH", session);
       showToast("info", "正在重新连接 DSH…");
     } catch (e) {
       showToast("error", errText(e));

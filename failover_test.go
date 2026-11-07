@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -11,9 +12,9 @@ import (
 
 func TestChooseDSHFallsBackFromPreferredWithoutSession(t *testing.T) {
 	peers := []lanPeer{
-		{ID: "A", Platform: "windows", Dispatch: true, DSHAddress: "http://a:13848",
+		{ID: "A", Platform: "windows", Dispatch: true, HasDSH: true,
 			DSH: DSHStatus{Connected: true}},
-		{ID: "B", Platform: "windows", Dispatch: true, DSHAddress: "http://b:13848",
+		{ID: "B", Platform: "windows", Dispatch: true, HasDSH: true,
 			DSH: DSHStatus{Connected: true, SessionID: "b-session"}},
 	}
 	if got := chooseDSH(peers, "A"); got == nil || got.ID != "B" {
@@ -40,7 +41,7 @@ func TestFailoverDoesNotReplayOwnedPromptAndSyncsBackupHistory(t *testing.T) {
 	client, hostA, hostB := start(phone), start(primary), start(backup)
 	peer := func(s *lanService) lanPeer {
 		return lanPeer{ID: s.id, Address: fmt.Sprintf("127.0.0.1:%d", s.port),
-			Platform: "windows", Dispatch: true, DSHAddress: "http://127.0.0.1:13848",
+			Platform: "windows", Dispatch: true, HasDSH: true,
 			DSH: DSHStatus{Connected: true, SessionID: "valid"}}
 	}
 	a, b := peer(hostA), peer(hostB)
@@ -125,21 +126,22 @@ func TestInterruptedBatchResumesSyncAndReconcilesOnlyExactPrompt(t *testing.T) {
 	if a.state.ActivePrompt != nil || a.state.Messages[0].Status != "uncertain" || a.batchPausedLocked() {
 		t.Fatal("disconnected host failed to release its expired batch")
 	}
-	row := sessionRow{SessionID: "dsh-a"}
-	var turn struct {
-		Turn     int    `json:"turn"`
-		Seq      int    `json:"seq"`
-		Prompt   string `json:"prompt"`
-		Response string `json:"response"`
-	}
-	turn.Seq, turn.Prompt, turn.Response = 2, "request", "other result"
-	row.Projections.Values.TurnOutline = append(row.Projections.Values.TurnOutline, turn)
-	a.dsh.reconcileUncertain(t.Context(), []sessionRow{row})
+	var settled atomic.Bool
+	a.dsh.conn = testConnector(t, func(request testConnectorRequest) string {
+		if request.Args.Request.SessionID != "dsh-a" || request.Args.Request.RequestID != id {
+			t.Errorf("wrong recovery target: %+v", request)
+		}
+		if !settled.Load() {
+			return `{"stage":"not-found"}`
+		}
+		return `{"stage":"completed","turn":1,"response":"exact result"}`
+	})
+	a.dsh.reconcileUncertain(t.Context())
 	if a.state.Messages[0].Status != "uncertain" {
 		t.Fatal("matched an unrelated DSH response with identical user text")
 	}
-	row.Projections.Values.TurnOutline[0].Prompt = "request\n\n<!-- todo-msg:" + id + " -->"
-	a.dsh.reconcileUncertain(t.Context(), []sessionRow{row})
+	settled.Store(true)
+	a.dsh.reconcileUncertain(t.Context())
 	if a.state.Messages[0].Status != "sent" || len(a.state.UncertainPrompts) != 0 ||
 		a.state.Events[len(a.state.Events)-1].SourceMessageID != id {
 		t.Fatal("late exact response did not reconcile")

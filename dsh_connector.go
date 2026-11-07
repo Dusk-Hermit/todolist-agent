@@ -18,7 +18,6 @@ import (
 type dshEndpoint struct {
 	base   string
 	secret []byte
-	plugin bool
 }
 
 func readDSHConnector() (dshEndpoint, error) {
@@ -43,7 +42,7 @@ func readDSHConnector() (dshEndpoint, error) {
 		config.Port < 1024 || config.Port > 65535 || len(config.Key) != 32 {
 		return dshEndpoint{}, fmt.Errorf("DSH 插件连接信息无效，请更新并重启 DSH 插件")
 	}
-	return dshEndpoint{base: fmt.Sprintf("http://127.0.0.1:%d", config.Port), secret: config.Key, plugin: true}, nil
+	return dshEndpoint{base: fmt.Sprintf("http://127.0.0.1:%d", config.Port), secret: config.Key}, nil
 }
 
 func (c *DSHClient) callConnector(ctx context.Context, conn dshEndpoint, method string, args any, timeout time.Duration) (json.RawMessage, int, error) {

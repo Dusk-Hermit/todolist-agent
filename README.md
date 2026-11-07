@@ -113,7 +113,7 @@ Download and run `TodoListAgent-Setup-win64.exe` from [GitHub Releases](https://
 On each Windows computer that handles prompts, download `todolist-agent-dsh-connector-<version>.tgz` from the same release and install it into the DSH profile you use. For DSH Desktop, run this in PowerShell.
 
 ```powershell
-dsh plugin --profile desktop add "C:\path\to\todolist-agent-dsh-connector-0.4.12.tgz"
+dsh plugin --profile desktop add "C:\path\to\todolist-agent-dsh-connector-0.4.13.tgz"
 ```
 
 Use `web` for the DSH Web profile or specify your custom profile name. If `dsh` is outside PATH, use PowerShell's `&` to run `resources\runtime\cli\bin\dsh.cmd` inside the DSH installation folder. Restart the selected DSH profile and reopen TodoList Agent or click **重新连接** in its settings. Android receives execution results from the paired computer.
@@ -145,7 +145,7 @@ From then on:
 
 Paired devices use encrypted connections and exchange changed records. Edits to separate tasks merge. Concurrent changes to the same task use that task's latest edit or deletion. Deletion markers keep stale devices from restoring deleted tasks. Upgrade all paired devices to 0.4.8 or later to use this merge behavior. Discovery follows the IPv4 multicast announcement and reply pattern used by [LocalSend](https://github.com/localsend/localsend).
 
-Android saves messages offline and shows the pending queue in Settings. After reconnecting, the PC waits about five seconds to collect the backlog and sorts the messages it has received by their creation times. It sends one at a time to DSH. New inputs join the pending queue during processing. Devices can still edit local tasks, and they exchange the batch results once DSH finishes.
+An idle PC collects new messages from already-synced online devices for about 350 milliseconds. Offline and newly reconnected devices keep the five-second backlog window. The PC sorts received messages by their creation times and sends them to DSH one at a time. New inputs join the pending queue during processing. The PC asks paired devices to sync as soon as the batch settles, with periodic sync as a fallback.
 
 To send text from another Android app, choose **TodoList Agent** in the system share sheet or in the text selection menu, then confirm **加入待发队列**. Shared text uses the same queue as messages typed into TodoList Agent.
 
@@ -189,11 +189,11 @@ Download installers from this project's GitHub Releases. The Windows updater che
 
 ### DSH connection and execution receipts
 
-The plugin listens on `127.0.0.1:17892` by default. To change the port, set `config.port` on the `todolist-agent-connector` row in the DSH profile overlay. The plugin writes the active port and a fresh key to `%USERPROFILE%\.dsh\todolist-connector.json` on startup. The Windows app reads that single endpoint and encrypts and authenticates requests and receipts. Keep the file within your own Windows account.
+The plugin listens on `127.0.0.1:17892` by default. To change the port, set `config.port` on the `todolist-agent-connector` row in the active DSH profile's `cordis.patch.yml`. The plugin writes the active port and a fresh key to `%USERPROFILE%\.dsh\todolist-connector.json` on startup. The Windows app reads that single endpoint and encrypts and authenticates requests and receipts. Keep the file within your own Windows account.
 
-The versioned `/todolist/v1/rpc` endpoint allows session listing, creation, and renaming, text prompt submission, and receipt lookups. `todolist/status` reports the time the message entered the session, turn number, end reason, and tool outcomes. Turn completion and individual tool success are recorded separately.
+The versioned `/todolist/v1/rpc` endpoint allows session listing, creation, and renaming, text prompt submission, and receipt lookups. `todolist/status` reports the time the message entered the session, turn number, end reason, and tool outcomes. `todolist/wait` listens for turn completion. The Windows app also keeps periodic receipt checks for recovery.
 
-Set an explicit legacy Web address in Settings or via `DSH_WEB_URL` to use the old DSH Web API and cookie authentication. Clear both settings to switch back to the plugin. Use HTTPS with a valid certificate for an intentionally remote DSH endpoint.
+Choose a model provider, model, and reasoning effort under **Plugins → todolist-agent-dsh-connector** in DSH. The next TodoList prompt applies those settings to the linked session. **Use session settings** follows the session's current model. TodoList for Windows connects only to the plugin endpoint, and Android connects to the paired PC's LAN service.
 
 ### The dedicated session
 

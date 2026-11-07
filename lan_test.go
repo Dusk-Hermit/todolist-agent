@@ -115,3 +115,30 @@ func TestLANQueuePersistsOrderAndDeduplicatesRetries(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestLivePromptWindowExtendsOnceWhenBacklogArrives(t *testing.T) {
+	a := isolatedApp(t)
+	a.dsh = newDSHClient(a)
+	now := time.Now()
+	live := queuedPrompt{ID: uuid.NewString(), Text: "live", At: now.UnixMilli(), Live: true}
+	offline := queuedPrompt{ID: uuid.NewString(), Text: "offline", At: now.Add(-time.Hour).UnixMilli()}
+	if err := a.enqueuePrompts([]queuedPrompt{live}); err != nil {
+		t.Fatal(err)
+	}
+	if ready := time.UnixMilli(a.state.QueueReadyAt); ready.Sub(now) < livePromptCollectTime-time.Millisecond || ready.Sub(now) > time.Second {
+		t.Fatalf("wrong live delay: %v", ready.Sub(now))
+	}
+	if err := a.enqueuePrompts([]queuedPrompt{offline}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := a.state.QueueReadyAt
+	if deadline < now.Add(promptCollectTime-time.Millisecond).UnixMilli() || orderedQueue(a.state.Queue)[0].ID != offline.ID {
+		t.Fatal("offline backlog did not extend collection and retain creation order")
+	}
+	if err := a.enqueuePrompts([]queuedPrompt{{ID: uuid.NewString(), Text: "another", At: now.UnixMilli()}}); err != nil {
+		t.Fatal(err)
+	}
+	if a.state.QueueReadyAt != deadline {
+		t.Fatal("more backlog postponed an already-open collection window")
+	}
+}
