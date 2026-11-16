@@ -1531,9 +1531,17 @@
     const focus = S.data.deepFocus;
     const remaining = Math.max(0, focus.endsAt - Date.now());
     const fraction = Math.max(0, Math.min(1, 1 - remaining / (focus.endsAt - focus.startedAt)));
-    const degrees = fraction * 360 + "deg";
     const dial = $("deepFocusDial");
-    dial.style.setProperty("--focus-angle", degrees);
+    const angle = fraction * 2 * Math.PI;
+    const x = 50 + 49 * Math.sin(angle);
+    const y = 50 - 49 * Math.cos(angle);
+    const sector = $("deepFocusSector");
+    sector.setAttribute("d", fraction > 0 && fraction < 1
+      ? `M 50 50 L 50 1 A 49 49 0 ${fraction > .5 ? 1 : 0} 1 ${x} ${y} Z` : "");
+    $("deepFocusFace").classList.toggle("complete", fraction === 1);
+    const radius = $("deepFocusRadius");
+    radius.setAttribute("x2", x);
+    radius.setAttribute("y2", y);
     dial.setAttribute("aria-valuenow", String(Math.floor(fraction * 100)));
     const formatted = formatFocusTime(Math.ceil(remaining / 1000));
     const time = $("deepFocusTime");

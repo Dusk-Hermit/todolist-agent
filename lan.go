@@ -152,6 +152,7 @@ func newLAN(a *App, cfg lanConfig, id string, port int) (*lanService, error) {
 	mux.HandleFunc("GET "+lanPrefix+"/info", s.handleInfo)
 	mux.HandleFunc("POST "+lanPrefix+"/sync", s.handleSync)
 	mux.HandleFunc("POST "+lanPrefix+"/apply", s.handleApply)
+	mux.HandleFunc("POST "+lanPrefix+"/focus", s.handleDeepFocus)
 	mux.HandleFunc("POST "+lanPrefix+"/enqueue", s.handleEnqueue)
 	mux.HandleFunc("POST "+lanPrefix+"/dispatch", s.handleDispatch)
 	s.server = &http.Server{ReadTimeout: 10 * time.Second, WriteTimeout: 12 * time.Second, IdleTimeout: 30 * time.Second,
@@ -471,6 +472,16 @@ func (s *lanService) probePeers(addresses map[string]bool) ([]lanPeer, error) {
 }
 
 func (s *lanService) exchange(peer lanPeer) error {
+	err := s.exchangeList(peer)
+	if errors.Is(err, errBatchRunning) {
+		// A DSH batch pauses list edits. Focus sessions have their own clock
+		// and can still be exchanged in both directions.
+		_ = s.exchangeDeepFocus(peer)
+	}
+	return err
+}
+
+func (s *lanService) exchangeList(peer lanPeer) error {
 	if peer.NeedsUpgrade {
 		return errLANMergeUpgrade
 	}
@@ -546,10 +557,6 @@ func (s *lanService) refresh(manual bool) (int, error) {
 	count := 0
 	synced := make(map[string]bool, len(peers))
 	for _, peer := range peers {
-		if peer.Paused {
-			syncErr = errBatchRunning
-			continue
-		}
 		if err := s.exchange(peer); err != nil {
 			syncErr = err
 		} else {

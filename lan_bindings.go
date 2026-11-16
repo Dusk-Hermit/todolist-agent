@@ -256,8 +256,12 @@ func (a *App) replicaForExchange() (replica, error) {
 }
 
 func (a *App) mergeReplica(other replica) error {
+	return a.mergeLANReplica(other, false)
+}
+
+func (a *App) mergeLANReplica(other replica, focusOnly bool) error {
 	a.mu.Lock()
-	if a.batchPausedLocked() {
+	if !focusOnly && a.batchPausedLocked() {
 		a.mu.Unlock()
 		return errBatchRunning
 	}

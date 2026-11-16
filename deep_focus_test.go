@@ -1,10 +1,57 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
 )
+
+func TestLANDeepFocusCrossesPausedWindowsBatch(t *testing.T) {
+	desktop, phone := isolatedApp(t), isolatedApp(t)
+	task, err := phone.bindingAddTodo(TodoInput{Title: "Focus task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := phone.bindingSetFocus(task.ID); err != nil {
+		t.Fatal(err)
+	}
+	code := randomToken()
+	startLAN := func(app *App) (*lanService, lanPeer) {
+		service, err := newLAN(app, lanConfig{Code: code}, app.replicaSnapshot().Device, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(service.close)
+		return service, lanPeer{ID: service.id, Address: fmt.Sprintf("127.0.0.1:%d", service.port)}
+	}
+	phoneLAN, phonePeer := startLAN(phone)
+	desktopLAN, desktopPeer := startLAN(desktop)
+	desktop.dsh = newDSHClient(desktop)
+	desktop.state.ActivePrompt = &activePrompt{}
+	desktopLAN.address = phonePeer.Address
+
+	if err := phone.bindingStartDeepFocus(300, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := desktopLAN.refresh(true); !errors.Is(err, errBatchRunning) {
+		t.Fatalf("expected the full list to remain paused, got %v", err)
+	}
+	session := phone.snapshot().DeepFocus
+	if state := desktop.snapshot(); state.DeepFocus != session || len(state.Todos) != 0 {
+		t.Fatalf("wanted only the focus state on Windows, got %+v", state.DeepFocus)
+	}
+	if err := desktop.bindingExitDeepFocus(session.ID); err != nil {
+		t.Fatal(err)
+	}
+	phoneLAN.peers = []lanPeer{desktopPeer}
+	phoneLAN.syncNotifiedPeer(lanSyncNotice{id: desktopPeer.ID, address: desktopPeer.Address})
+	if state := phone.snapshot(); !state.DeepFocus.Exited ||
+		!slices.ContainsFunc(state.Events, func(e HistoryEvent) bool { return e.Kind == "deep-focus.exit" }) {
+		t.Fatal("phone did not receive the Windows exit through the actual LAN endpoint")
+	}
+}
 
 func TestDeepFocusReplicatesLockCompletionAndExit(t *testing.T) {
 	desktop, phone := isolatedApp(t), isolatedApp(t)
