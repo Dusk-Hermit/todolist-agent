@@ -238,6 +238,9 @@ func replicaValues(state persistedState) map[string]json.RawMessage {
 	if state.FocusID != "" {
 		add("focus", state.FocusID)
 	}
+	if state.DeepFocus.ID != "" {
+		add("deep-focus", state.DeepFocus)
+	}
 	for _, m := range state.Messages {
 		if m.Kind != "onboarding" {
 			add("message:"+m.ID, m)
@@ -268,6 +271,7 @@ func (a *App) captureReplicaLocked() bool {
 func (r replica) applyTo(state *persistedState) error {
 	state.Todos = []Todo{}
 	state.FocusID = ""
+	state.DeepFocus = deepFocus{}
 	messages := []ChatMessage{}
 	events := []HistoryEvent{}
 	for _, m := range state.Messages {
@@ -288,6 +292,8 @@ func (r replica) applyTo(state *persistedState) error {
 		switch {
 		case key == "focus":
 			err = json.Unmarshal(record.Value, &state.FocusID)
+		case key == "deep-focus":
+			err = json.Unmarshal(record.Value, &state.DeepFocus)
 		case strings.HasPrefix(key, "todo:"):
 			var t Todo
 			err = json.Unmarshal(record.Value, &t)

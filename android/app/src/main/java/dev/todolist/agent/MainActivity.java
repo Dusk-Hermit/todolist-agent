@@ -79,6 +79,7 @@ public final class MainActivity extends Activity {
         super.onCreate(saved);
         web = new WebView(this);
         web.getSettings().setJavaScriptEnabled(true);
+        web.getSettings().setDomStorageEnabled(true);
         web.getSettings().setAllowFileAccess(false);
         web.getSettings().setAllowContentAccess(false);
         web.getSettings().setBlockNetworkLoads(true);

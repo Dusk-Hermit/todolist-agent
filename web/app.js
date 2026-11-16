@@ -189,6 +189,7 @@
     if (!s.prefs) s.prefs = {};
     if (!s.prefs.onboardedSessions) s.prefs.onboardedSessions = {};
     S.data = s;
+    renderDeepFocus();
     if (FILTERS.includes(s.prefs.filter)) S.filter = s.prefs.filter;
     if (s.prefs.viewMode === "compact" || s.prefs.viewMode === "cards") {
       S.viewMode = s.prefs.viewMode;
@@ -957,6 +958,9 @@
     switch (e.kind) {
       case "input": return ["user", "i-send"];
       case "onboarding": return ["user", "i-bolt"];
+      case "deep-focus.start":
+      case "deep-focus.complete":
+      case "deep-focus.exit": return ["done", "i-focus-timer"];
       case "todo.add": return [e.actor === "agent" ? "agent" : "user", "i-plus"];
       case "todo.complete": return ["done", "i-check"];
       case "todo.move": return ["", "i-list"];
@@ -1445,7 +1449,194 @@
 
   // ---------------------------------------------------------------- wiring
 
+  const focusWheels = [];
+  let focusTicker = 0;
+  let focusConfirmation;
+  let focusBusy = false;
+
+  function focusDuration() {
+    const [hours, minutes, seconds] = focusWheels.map(({ wheel, step }) =>
+      Math.round(wheel.scrollTop / wheel.firstElementChild.offsetHeight) * step);
+    return Math.max(10, Math.min(86400, hours * 3600 + minutes * 60 + seconds));
+  }
+
+  function setFocusDuration(seconds) {
+    const values = [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60];
+    focusWheels.forEach(({ wheel, step }, index) => {
+      wheel.scrollTop = values[index] / step * wheel.firstElementChild.offsetHeight;
+    });
+    updateFocusWheels();
+  }
+
+  function updateFocusWheels() {
+    for (const { wheel, step } of focusWheels) {
+      const index = Math.round(wheel.scrollTop / wheel.firstElementChild.offsetHeight);
+      wheel.setAttribute("aria-valuenow", String(index * step));
+      wheel.querySelector(".selected")?.classList.remove("selected");
+      wheel.children[index]?.classList.add("selected");
+    }
+    for (const button of $("deepFocusPresets").querySelectorAll("[data-seconds]")) {
+      button.setAttribute("aria-pressed", String(Number(button.dataset.seconds) === focusDuration()));
+    }
+    $("deepFocusDuration").textContent = formatFocusTime(focusDuration());
+  }
+
+  function confirmFocus(title, text, action) {
+    $("deepFocusConfirmTitle").textContent = title;
+    $("deepFocusConfirmText").textContent = text;
+    focusConfirmation = action;
+    const dialog = $("deepFocusConfirm");
+    dialog.returnValue = "";
+    dialog.showModal();
+  }
+
+  async function changeDeepFocus(name, ...args) {
+    if (focusBusy) return;
+    focusBusy = true;
+    try {
+      await call(name, ...args);
+      applyState(await call("todo_getState"));
+    } catch (error) {
+      showToast("error", errText(error));
+      const dialog = $("deepFocusSetup");
+      if (dialog.open) dialog.close();
+    } finally {
+      focusBusy = false;
+    }
+  }
+
+  function renderDeepFocus() {
+    const screen = $("deepFocusScreen");
+    const focus = S.data?.deepFocus;
+    if (!focus?.id || focus.exited) {
+      if (screen.open) {
+        $("deepFocusConfirm").close();
+        screen.close();
+      }
+      clearInterval(focusTicker);
+      focusTicker = 0;
+      return;
+    }
+    if (!screen.open) {
+      $("deepFocusConfirm").close();
+      $("deepFocusSetup").close();
+      screen.showModal();
+    }
+    $("deepFocusTitle").textContent = focus.title;
+    tickDeepFocus();
+    if (!focusTicker && focus.endsAt > Date.now()) focusTicker = setInterval(tickDeepFocus, 100);
+  }
+
+  function tickDeepFocus() {
+    const focus = S.data.deepFocus;
+    const remaining = Math.max(0, focus.endsAt - Date.now());
+    const fraction = Math.max(0, Math.min(1, 1 - remaining / (focus.endsAt - focus.startedAt)));
+    const degrees = fraction * 360 + "deg";
+    const dial = $("deepFocusDial");
+    dial.style.setProperty("--focus-angle", degrees);
+    dial.setAttribute("aria-valuenow", String(Math.floor(fraction * 100)));
+    const formatted = formatFocusTime(Math.ceil(remaining / 1000));
+    const time = $("deepFocusTime");
+    if (time.textContent !== formatted) time.textContent = formatted;
+    $("deepFocusFinished").hidden = remaining > 0;
+    const exit = $("deepFocusExit");
+    exit.disabled = focus.locked && remaining > 0;
+    const label = exit.disabled ? "计时结束后可退出" : remaining > 0 ? "退出专注" : "返回清单";
+    if (exit.textContent !== label) exit.textContent = label;
+    if (!remaining) {
+      clearInterval(focusTicker);
+      focusTicker = 0;
+    }
+  }
+
+  function formatFocusTime(seconds) {
+    return [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60]
+      .map(part => String(part).padStart(2, "0")).join(":");
+  }
+
+  function bindDeepFocus() {
+    for (const [label, count, step] of [["小时", 25, 1], ["分钟", 60, 1], ["秒", 6, 10]]) {
+      const group = document.createElement("div");
+      const wheel = document.createElement("div");
+      wheel.className = "focus-wheel";
+      wheel.tabIndex = 0;
+      wheel.setAttribute("role", "spinbutton");
+      wheel.setAttribute("aria-label", label);
+      wheel.setAttribute("aria-valuemin", "0");
+      wheel.setAttribute("aria-valuemax", String((count - 1) * step));
+      for (let i = 0; i < count; i++) {
+        const row = document.createElement("div");
+        row.textContent = String(i * step).padStart(2, "0");
+        row.setAttribute("aria-hidden", "true");
+        row.addEventListener("click", () => wheel.scrollTo({ top: i * row.offsetHeight, behavior: "smooth" }));
+        wheel.append(row);
+      }
+      wheel.addEventListener("scroll", updateFocusWheels, { passive: true });
+      wheel.addEventListener("keydown", event => {
+        if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+        event.preventDefault();
+        wheel.scrollTop += (event.key === "ArrowDown" ? 1 : -1) * wheel.firstElementChild.offsetHeight;
+      });
+      const unit = document.createElement("span");
+      unit.textContent = label;
+      group.append(wheel, unit);
+      $("deepFocusWheels").append(group);
+      focusWheels.push({ wheel, step });
+    }
+    const setup = $("deepFocusSetup");
+    $("deepFocusBtn").addEventListener("click", () => {
+      const task = findTodo(S.data?.focusId);
+      if (!task) {
+        showToast("info", "请先在清单中选中一个要专注的待办项");
+        return;
+      }
+      $("deepFocusSetupTask").textContent = task.title;
+      $("deepFocusLock").checked = false;
+      setup.showModal();
+      setFocusDuration(600);
+    });
+    $("deepFocusSetupCancel").addEventListener("click", () => setup.close());
+    $("deepFocusPresets").addEventListener("click", event => {
+      const button = event.target.closest("[data-seconds]");
+      if (button) setFocusDuration(Number(button.dataset.seconds));
+    });
+    $("deepFocusStart").addEventListener("click", () => {
+      const seconds = focusDuration();
+      const locked = $("deepFocusLock").checked;
+      const start = () => changeDeepFocus("todo_startDeepFocus", seconds, locked);
+      if (locked) confirmFocus("禁止中途退出", "开始后，各设备均需等到计时结束才能退出高度专注。", start);
+      else start();
+    });
+    $("deepFocusConfirm").addEventListener("close", event => {
+      const action = focusConfirmation;
+      focusConfirmation = null;
+      if (event.target.returnValue === "confirm") action?.();
+    });
+    $("deepFocusScreen").addEventListener("cancel", event => {
+      event.preventDefault();
+      if (!$("deepFocusExit").disabled) $("deepFocusExit").click();
+    });
+    $("deepFocusExit").addEventListener("click", () => {
+      const focus = S.data.deepFocus;
+      const leave = () => changeDeepFocus("todo_exitDeepFocus", focus.id);
+      if (Date.now() >= focus.endsAt) leave();
+      else confirmFocus("退出高度专注？", "本次计时会结束，并同步到其他设备。", leave);
+    });
+    const digits = $("deepFocusDigits");
+    try { digits.checked = localStorage.getItem("deepFocusDigits") !== "off"; } catch {}
+    const setDigits = () => {
+      $("deepFocusNumber").classList.toggle("collapsed", !digits.checked);
+      $("deepFocusNumber").setAttribute("aria-hidden", String(!digits.checked));
+    };
+    digits.addEventListener("change", () => {
+      setDigits();
+      try { localStorage.setItem("deepFocusDigits", digits.checked ? "on" : "off"); } catch {}
+    });
+    setDigits();
+  }
+
   function bindUI() {
+    bindDeepFocus();
     $("pinBtn").addEventListener("click", togglePin);
     $("journalBtn").addEventListener("click", () => openPanel("journal"));
     $("historyBtn").addEventListener("click", () => openPanel("history"));
@@ -1616,6 +1807,7 @@
     $("settingsLayer").addEventListener("mousedown", (e) => { if (e.target === $("settingsLayer")) closeSettings(); });
 
     document.addEventListener("keydown", (e) => {
+      if (["deepFocusScreen", "deepFocusSetup", "deepFocusConfirm"].some(id => $(id).open)) return;
       if (e.key === "Escape") {
         if ($("deleteDialog").open) return;
         if (S.taskOpen) closeTaskModal();

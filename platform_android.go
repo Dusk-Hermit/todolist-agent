@@ -123,8 +123,12 @@ func TodoInvoke(method, data *C.char) *C.char {
 		"todo_setTodoStatus": a.bindingSetTodoStatus,
 		"todo_deleteTodo":    a.bindingDeleteTodo, "todo_moveTodo": a.bindingMoveTodo,
 		"todo_setFocus": a.bindingSetFocus, "todo_journal": a.bindingJournal,
-		"todo_sendInput": a.bindingSendInput,
-		"todo_lanState":  a.bindingLANState, "todo_lanConfigure": a.bindingLANConfigure,
+		"todo_startDeepFocus": func(seconds int, locked bool) (bool, error) {
+			return true, a.bindingStartDeepFocus(seconds, locked)
+		},
+		"todo_exitDeepFocus": func(id string) (bool, error) { return true, a.bindingExitDeepFocus(id) },
+		"todo_sendInput":     a.bindingSendInput,
+		"todo_lanState":      a.bindingLANState, "todo_lanConfigure": a.bindingLANConfigure,
 		"todo_lanRefresh": a.bindingLANRefresh, "todo_lanSelect": a.bindingLANSelect,
 		"todo_updateState": a.bindingUpdateState, "todo_updateCheck": a.bindingUpdateCheck,
 		"todo_updateInstall": a.bindingUpdateInstall,

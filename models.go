@@ -2,7 +2,7 @@ package main
 
 const (
 	appName    = "TodoList Agent"
-	appVersion = "0.4.18"
+	appVersion = "0.4.19"
 	appID      = "Dusk.TodoListAgent"
 
 	statusTodo  = "todo"
@@ -112,6 +112,7 @@ type persistedState struct {
 	DSH              DSHConfig               `json:"dsh"`
 	Bridge           BridgeConfig            `json:"bridge"`
 	FocusID          string                  `json:"focusId,omitempty"`
+	DeepFocus        deepFocus               `json:"deepFocus"`
 }
 
 type DSHStatus struct {
@@ -184,6 +185,7 @@ type StatePayload struct {
 	Uncertain    int             `json:"uncertainPrompts"`
 	Prefs        Prefs           `json:"prefs"`
 	FocusID      string          `json:"focusId,omitempty"`
+	DeepFocus    deepFocus       `json:"deepFocus"`
 	DSH          DSHStatus       `json:"dsh"`
 	Config       DSHConfig       `json:"config"`
 	Bridge       BridgePublic    `json:"bridge"`

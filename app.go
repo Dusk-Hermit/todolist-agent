@@ -23,10 +23,11 @@ type App struct {
 	stateEmitMu sync.Mutex
 	updates     updater
 
-	state     persistedState
-	dataPath  string
-	dirty     bool
-	saveTimer *time.Timer
+	state          persistedState
+	dataPath       string
+	dirty          bool
+	saveTimer      *time.Timer
+	deepFocusTimer *time.Timer
 
 	quitting bool
 	platformState
@@ -76,6 +77,7 @@ func (a *App) Shutdown() {
 		return
 	}
 	a.quitting = true
+	a.scheduleDeepFocusLocked()
 	a.mu.Unlock()
 
 	a.stopLAN()
@@ -152,6 +154,7 @@ func (a *App) snapshot() StatePayload {
 		Uncertain:    uncertain,
 		Prefs:        prefs,
 		FocusID:      a.state.FocusID,
+		DeepFocus:    a.state.DeepFocus,
 		DSH:          a.status,
 		Config:       cfg,
 		Bridge:       bridge,

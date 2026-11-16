@@ -64,6 +64,9 @@ func (a *App) load() error {
 		a.dirty = true
 		a.saveNow()
 	}
+	a.mu.Lock()
+	a.scheduleDeepFocusLocked()
+	a.mu.Unlock()
 	return nil
 }
 

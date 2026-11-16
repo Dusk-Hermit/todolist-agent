@@ -5,6 +5,7 @@
   const methods = [
     "ready", "getState", "addTodo", "updateTodo", "setTodoStatus",
     "deleteTodo", "moveTodo", "setFocus", "journal", "sendInput", "savePrefs",
+    "startDeepFocus", "exitDeepFocus",
     "lanState", "lanConfigure", "lanRefresh", "lanSelect",
     "updateState", "updateCheck", "updateInstall", "updateAuto",
   ];

@@ -47,15 +47,19 @@ func createMainWindow(a *App) webview2.WebView {
 	a.installWindowChrome()
 
 	bindings := map[string]any{
-		"todo_ready":           a.bindingReady,
-		"todo_getState":        a.bindingGetState,
-		"todo_sendInput":       a.bindingSendInput,
-		"todo_addTodo":         a.bindingAddTodo,
-		"todo_updateTodo":      a.bindingUpdateTodo,
-		"todo_deleteTodo":      a.bindingDeleteTodo,
-		"todo_setTodoStatus":   a.bindingSetTodoStatus,
-		"todo_moveTodo":        a.bindingMoveTodo,
-		"todo_setFocus":        a.bindingSetFocus,
+		"todo_ready":         a.bindingReady,
+		"todo_getState":      a.bindingGetState,
+		"todo_sendInput":     a.bindingSendInput,
+		"todo_addTodo":       a.bindingAddTodo,
+		"todo_updateTodo":    a.bindingUpdateTodo,
+		"todo_deleteTodo":    a.bindingDeleteTodo,
+		"todo_setTodoStatus": a.bindingSetTodoStatus,
+		"todo_moveTodo":      a.bindingMoveTodo,
+		"todo_setFocus":      a.bindingSetFocus,
+		"todo_startDeepFocus": func(seconds int, locked bool) (bool, error) {
+			return true, a.bindingStartDeepFocus(seconds, locked)
+		},
+		"todo_exitDeepFocus":   func(id string) (bool, error) { return true, a.bindingExitDeepFocus(id) },
 		"todo_journal":         a.bindingJournal,
 		"todo_savePrefs":       a.bindingSavePrefs,
 		"todo_setAlwaysOnTop":  a.bindingSetAlwaysOnTop,

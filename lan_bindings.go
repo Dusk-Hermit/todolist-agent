@@ -301,8 +301,12 @@ func (a *App) persistLocked(next persistedState) error {
 		err = atomicWrite(a.dataPath, payload)
 	}
 	if err == nil {
+		focusChanged := a.state.DeepFocus != next.DeepFocus
 		a.state = next
 		a.dirty = false
+		if focusChanged {
+			a.scheduleDeepFocusLocked()
+		}
 	}
 	return err
 }
